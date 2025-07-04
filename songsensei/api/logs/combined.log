@@ -1,0 +1,15 @@
+{"level":"info","message":"API server running on port 4000","service":"songsensei-api","timestamp":"2025-07-04T13:42:16.877Z"}
+{"level":"info","message":"Environment: development","service":"songsensei-api","timestamp":"2025-07-04T13:42:16.885Z"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:13:57:51 +0000] \"GET / HTTP/1.1\" 404 27 \"-\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0\"","service":"songsensei-api","timestamp":"2025-07-04T13:57:51.499Z"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:13:57:51 +0000] \"GET /favicon.ico HTTP/1.1\" 404 27 \"-\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0\"","service":"songsensei-api","timestamp":"2025-07-04T13:57:51.707Z"}
+{"environment":"development","level":"info","message":"Health check requested","service":"songsensei-api","status":"healthy","timestamp":"2025-07-04T14:42:21.659Z","uptime":1260.380349695,"version":"1.0.0"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:14:42:21 +0000] \"GET /api/health HTTP/1.1\" 200 129 \"-\" \"curl/8.13.0\"","service":"songsensei-api","timestamp":"2025-07-04T14:42:21.692Z"}
+{"level":"info","message":"API server running on port 4000","service":"songsensei-api","timestamp":"2025-07-04T14:44:09.892Z"}
+{"level":"info","message":"Environment: development","service":"songsensei-api","timestamp":"2025-07-04T14:44:09.906Z"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:14:48:54 +0000] \"GET / HTTP/1.1\" 404 27 \"-\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0\"","service":"songsensei-api","timestamp":"2025-07-04T14:48:54.429Z"}
+{"level":"info","message":"Ingesting YouTube URL","service":"songsensei-api","timestamp":"2025-07-04T14:53:04.315Z","userConsent":true,"youtubeUrl":"https://www.youtube.com/watch?v=y_u1eu6Lpds&list=RDy_u1eu6Lpds&start_radio=1"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:14:53:04 +0000] \"POST /api/analysis/ingest HTTP/1.1\" 202 130 \"-\" \"curl/8.13.0\"","service":"songsensei-api","timestamp":"2025-07-04T14:53:04.326Z"}
+{"jobId":"job_1751640784316_k6lwqgy49","level":"info","message":"Checking job status","service":"songsensei-api","timestamp":"2025-07-04T14:53:26.452Z"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:14:53:26 +0000] \"GET /api/analysis/status/job_1751640784316_k6lwqgy49 HTTP/1.1\" 200 172 \"-\" \"curl/8.13.0\"","service":"songsensei-api","timestamp":"2025-07-04T14:53:26.458Z"}
+{"endTime":10,"jobId":"job_1751640784316_k6lwqgy49","level":"info","message":"Starting analysis","service":"songsensei-api","startTime":0,"timestamp":"2025-07-04T14:53:40.165Z"}
+{"level":"info","message":"172.18.0.1 - - [04/Jul/2025:14:53:40 +0000] \"POST /api/analysis/analyze HTTP/1.1\" 200 462 \"-\" \"curl/8.13.0\"","service":"songsensei-api","timestamp":"2025-07-04T14:53:40.168Z"}

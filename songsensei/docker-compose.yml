@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://api:4000
+    depends_on:
+      - api
+
+  api:
+    build: ./api
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - ANALYSIS_SERVICE_URL=http://analysis:5000
+      - POSTGRES_URL=postgresql://postgres:password@postgres:5432/songsensei
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+      - temp_audio:/tmp/audio
+    depends_on:
+      - postgres
+      - analysis
+
+  analysis:
+    build: ./analysis
+    ports:
+      - "5000:5000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./analysis:/app
+      - temp_audio:/tmp/audio
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=songsensei
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
+  temp_audio:
+
+networks:
+  default:
+    name: songsensei_network
