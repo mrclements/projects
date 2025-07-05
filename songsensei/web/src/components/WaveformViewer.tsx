@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
+import axios from 'axios';
+import { JobStatusResponse } from '../types/analysis';
 
 interface WaveformViewerProps {
   jobId: string | null;
@@ -22,32 +24,32 @@ const WaveformViewer: React.FC<WaveformViewerProps> = ({
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [duration, setDuration] = useState(0);
 
-  // Mock waveform data for development
-  const mockWaveformData = {
-    peaks: Array.from({ length: 1000 }, (_, i) => Math.sin(i * 0.01) * Math.random() * 0.8),
-    duration: 180,
-    sample_rate: 44100,
-    metadata: {
-      title: "Sample Song",
-      artist: "Sample Artist"
-    }
-  };
-
-  useEffect(() => {
-    if (jobId && !data && !isLoading) {
-      // Simulate loading waveform data
-      setTimeout(() => {
-        onDataLoaded(mockWaveformData);
-        setDuration(mockWaveformData.duration);
-      }, 2000);
-    }
-  }, [jobId, data, isLoading, onDataLoaded]);
 
   useEffect(() => {
     if (data && waveformRef.current) {
       renderWaveform();
     }
   }, [data]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    let intervalId: NodeJS.Timeout;
+    intervalId = setInterval(async () => {
+      try {
+const resp = await axios.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
+        const { status, waveform_data } = resp.data;
+        if (status === 'completed' && waveform_data) {
+          onDataLoaded(waveform_data);
+          setDuration(waveform_data.duration);
+          clearInterval(intervalId);
+        }
+      } catch (err) {
+        console.error('Status polling error:', err);
+        clearInterval(intervalId);
+      }
+    }, 2000);
+    return () => clearInterval(intervalId);
+  }, [jobId, data, isLoading, onDataLoaded]);
 
   const renderWaveform = () => {
     if (!waveformRef.current || !data) return;

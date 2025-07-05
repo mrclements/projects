@@ -22,6 +22,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
+app.get('/', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/health', healthRoutes);
 app.use('/api/analysis', analysisRoutes);
 

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Music, Play, Square, Download } from 'lucide-react';
+import axios from 'axios';
+import { Music, Play } from 'lucide-react';
 import YouTubeUrlInput from './components/YouTubeUrlInput';
 import WaveformViewer from './components/WaveformViewer';
 import AnalysisPanel from './components/AnalysisPanel';
 import LegalDisclaimer from './components/LegalDisclaimer';
-import { AnalysisResult, JobStatus } from './types/analysis';
+import { AnalysisResult, JobStatus, AnalysisResponse } from './types/analysis';
 
 function App() {
   const [currentJob, setCurrentJob] = useState<string | null>(null);
@@ -24,13 +25,37 @@ function App() {
     setJobStatus('ready');
   };
 
-  const handleAnalysisComplete = (result: AnalysisResult) => {
-    setAnalysisResult(result);
-    setJobStatus('analyzed');
-  };
-
   const handleTrimSelection = (start: number, end: number) => {
     setTrimSelection({ start, end });
+  };
+
+  const triggerAnalysis = async () => {
+    if (!currentJob || !trimSelection) return;
+    setJobStatus('analyzing');
+    try {
+      await axios.post('/api/analysis/analyze', {
+        jobId: currentJob,
+        startTime: trimSelection.start,
+        endTime: trimSelection.end,
+      });
+      const interval = setInterval(async () => {
+        try {
+          const resp = await axios.get<AnalysisResponse>(`/api/analysis/analysis/${currentJob}`);
+          if (resp.data.status === 'completed' && resp.data.analysis) {
+            setAnalysisResult(resp.data.analysis as AnalysisResult);
+            setJobStatus('analyzed');
+            clearInterval(interval);
+          }
+        } catch (err) {
+          console.error('Analysis polling error:', err);
+          clearInterval(interval);
+          setJobStatus('failed');
+        }
+      }, 2000);
+    } catch (err) {
+      console.error('Analysis start error:', err);
+      setJobStatus('failed');
+    }
   };
 
   return (
@@ -56,13 +81,13 @@ function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-8">
-          
+
           {/* YouTube URL Input */}
           <div className="card">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">
               1. Load YouTube Video
             </h2>
-            <YouTubeUrlInput 
+            <YouTubeUrlInput
               onJobCreated={handleJobCreated}
               onShowDisclaimer={() => setShowDisclaimer(true)}
               disabled={jobStatus === 'processing'}
@@ -96,12 +121,9 @@ function App() {
                   Selected: {trimSelection.start.toFixed(1)}s - {trimSelection.end.toFixed(1)}s
                   ({(trimSelection.end - trimSelection.start).toFixed(1)}s duration)
                 </div>
-                <button 
+                <button
                   className="btn-primary"
-                  onClick={() => {
-                    setJobStatus('analyzing');
-                    // TODO: Trigger analysis
-                  }}
+                  onClick={triggerAnalysis}
                 >
                   <Play className="h-4 w-4 mr-2" />
                   Analyze Chords & Tabs
@@ -112,7 +134,7 @@ function App() {
 
           {/* Analysis Results */}
           {analysisResult && (
-            <AnalysisPanel 
+            <AnalysisPanel
               result={analysisResult}
               jobId={currentJob}
               trimSelection={trimSelection}
@@ -157,7 +179,7 @@ function App() {
 
       {/* Legal Disclaimer Modal */}
       {showDisclaimer && (
-        <LegalDisclaimer 
+        <LegalDisclaimer
           onAccept={() => setShowDisclaimer(false)}
           onCancel={() => setShowDisclaimer(false)}
         />

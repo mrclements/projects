@@ -1,4 +1,4 @@
-export type JobStatus = 'idle' | 'processing' | 'ready' | 'analyzing' | 'analyzed' | 'failed';
+export type JobStatus = 'idle' | 'processing' | 'ready' | 'completed' | 'analyzing' | 'analyzed' | 'failed';
 
 export interface WaveformData {
   peaks: number[];

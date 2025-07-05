@@ -21,7 +21,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir Cython numpy
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements.txt \
+ && pip install --no-cache-dir --upgrade "yt-dlp>=2024.05.01"
 
 # Copy source code
 COPY . .

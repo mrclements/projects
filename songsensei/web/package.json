@@ -4,28 +4,26 @@
   "description": "SongSensei React frontend - waveform trimming and chord/tab visualization",
   "private": true,
   "dependencies": {
+    "@tailwindcss/forms": "^0.5.6",
+    "@tailwindcss/typography": "^0.5.10",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.5.2",
     "@types/jest": "^27.5.2",
     "@types/node": "^16.18.59",
-    "@types/react": "^18.2.33",
-    "@types/react-dom": "^18.2.14",
+    "axios": "^1.5.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.0.0",
+    "lucide-react": "^0.292.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
-    "typescript": "^4.9.5",
-    "web-vitals": "^2.1.4",
-    "wavesurfer.js": "^7.3.2",
-    "tone": "^14.7.77",
-    "vexflow": "^4.2.2",
-    "axios": "^1.5.0",
     "tailwindcss": "^3.3.5",
-    "@tailwindcss/forms": "^0.5.6",
-    "@tailwindcss/typography": "^0.5.10",
-    "lucide-react": "^0.292.0",
-    "clsx": "^2.0.0",
-    "class-variance-authority": "^0.7.0"
+    "tone": "^14.7.77",
+    "typescript": "^4.9.5",
+    "vexflow": "^4.2.2",
+    "wavesurfer.js": "^7.3.2",
+    "web-vitals": "^2.1.4"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -55,13 +53,16 @@
     ]
   },
   "devDependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
     "@types/wavesurfer.js": "^6.0.7",
-    "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.31",
-    "prettier": "^3.0.3",
-    "eslint": "^8.51.0",
     "@typescript-eslint/eslint-plugin": "^6.10.0",
-    "@typescript-eslint/parser": "^6.10.0"
+    "@typescript-eslint/parser": "^6.10.0",
+    "autoprefixer": "^10.4.16",
+    "eslint": "^8.51.0",
+    "postcss": "^8.4.31",
+    "prettier": "^3.0.3"
   },
   "proxy": "http://localhost:4000"
 }

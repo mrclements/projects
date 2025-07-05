@@ -1,0 +1,167 @@
+
+1. Purpose in one sentence
+Given a WAV (or any Librosa-readable) file and a start/end time window, it tries to return a JSON-style dict describing:
+
+the musical key
+
+the tempo and a default time signature
+
+a list of chords (each with timestamp and confidence)
+
+a quick-and-dirty guitar tab for strumming those chords
+
+a combined confidence score
+
+All heavy lifting is delegated to specialised libraries—Essentia for key & tempo, madmom for chords, music21 for symbolic tasks (not actually used yet)—with built-in fall-backs to Librosa or hand-rolled “best guess” code if those libraries aren’t present.
+
+2. Dependency checks
+python
+Copy
+Edit
+try:
+    import essentia.standard as es
+    ESSENTIA_AVAILABLE = True
+except ImportError:
+    ESSENTIA_AVAILABLE = False
+    logger.warning("Essentia not available - using fallback implementations")
+That pattern repeats for madmom and music21.
+
+If Essentia is missing → key & tempo fall back to Librosa.
+
+If madmom is missing → chords fall back to a canned I-V-vi-IV in C.
+
+music21 isn’t yet used directly, but the import check is future-proofing.
+
+3. Object lifecycle
+python
+Copy
+Edit
+analyzer = MusicAnalyzer(sample_rate=44100)
+result = await analyzer.analyze_segment("path/to.wav", start_time=30, end_time=45)
+__init__ – records the target sample rate and calls setup_analyzers().
+
+setup_analyzers() – instantiates Essentia or madmom processors if those libs are present.
+
+4. Main entry point – analyze_segment
+Load & trim: _load_audio_segment uses Librosa to read the file, resamples if necessary, and slices out the [start_time:end_time] window.
+
+Async fan-out: It asyncio.gathers three coroutines in parallel
+
+_detect_key
+
+_detect_tempo
+
+_analyze_chords
+
+Tab generation: _generate_guitar_tabs takes the chord list + tempo and builds a naïve strumming outline.
+
+Confidence: _calculate_confidence averages the confidence values it has.
+
+Returns: a dict with keys "key", "tempo", "chords", "tab", "confidence" plus stubs for "key_changes" / "modulations".
+
+5. Inside the helpers
+Helper	What it really does	Caveats
+_load_audio_segment	Uses librosa.load → always mono, resampled to sample_rate.	Long segments on large WAVs will live in RAM; consider streaming if memory becomes an issue.
+_detect_key	If Essentia: es.KeyExtractor() → returns (key, scale, strength).
+Else: crude chroma mean → picks the strongest pitch-class, guesses major.	Librosa fallback is very rough—minor keys will often be mis-classified.
+_detect_tempo	If Essentia: es.RhythmExtractor2013() → BPM & confidence.
+Else: librosa.beat.beat_track.	Librosa beat tracking is decent but less robust on complex mixes.
+_analyze_chords	If madmom: DeepChromaChordRecognitionProcessor on the raw segment.
+Outputs a list of labelled chords (no per-chord confidence, so a flat 0.8 is assigned).
+Else: returns the canned C–G–Am–F progression.	Madmom expects a file or array at the original sample rate (must match what it was trained on, usually 44.1 k). Also: time alignment is guessed by subdividing the segment evenly—could be off-beat.
+_generate_guitar_tabs	Maps each chord name to a hard-coded fingering dictionary, assumes 4/4, and emits a single strumming pattern D D U D U.	Doesn’t respect chord duration or rhythmic groove; slash-chords & extensions stripped crudely; barre-shape F only.
+_calculate_confidence	A straight arithmetic mean of whatever confidences are collected.	Treats every chord equal to key/tempo—could overweight a long list of chords.
+
+6. What it won’t do yet
+Detect key changes or modulations – placeholders only.
+
+Sense time-signature shifts – hard-coded "4/4".
+
+Output exact chord timing (unless chord processor already aligns); fallback just divides the segment length by number of chords.
+
+Generate MIDI, MusicXML, or staff notation—only a dict and crude tab.
+
+7. Typical output (happy-path with all libs available)
+python
+Copy
+Edit
+{
+  'key': 'C major',
+  'tempo': 97.6,
+  'time_signature': '4/4',
+  'confidence': 0.79,
+  'chords': [
+        {'time': 30.0, 'chord': 'C:maj',  'confidence': 0.8, 'is_diatonic': True},
+        {'time': 32.5, 'chord': 'G:maj',  'confidence': 0.8, 'is_diatonic': True},
+        ...
+  ],
+  'tab': {
+        'measures': [
+            {'time': 30.0, 'chord': 'C:maj', 'frets': [0,1,0,2,3,0], 'strumming_pattern': 'D D U D U'},
+            ...
+        ],
+        'tempo': 97.6,
+        'time_signature': '4/4',
+        'tuning': ['E','A','D','G','B','E'],
+        'capo': 0
+  },
+  'key_changes': [],
+  'modulations': []
+}
+8. Potential improvements / gotchas
+Sample-rate mismatch – Madmom’s deep chroma model assumes 44.1 k mono, but Essentia’s can operate at whatever you feed it. Decide on a single resample path for all.
+
+Thread safety – Essentia processors are usually stateless, but if you store them as instance attributes you should mark methods asyncio.to_thread or add a semaphore if running many analyses in parallel.
+
+Chunked chord timing – Instead of i / len(chords) you could use each chord label’s .position attribute (madmom provides frame indices).
+
+Confidence weighting – You might weight key/tempo more heavily than per-chord confidence when computing the overall score.
+
+Fallback granularity – If Essentia is missing but madmom is present, or vice-versa, you’ll want independent fallbacks rather than all-or-nothing defaults.
+
+music21 integration – Could turn the chord list into a music21.stream.Stream, then derive cadences, detect key modulations, export MusicXML, etc.
+
+Tab accuracy – For real usability you’ll want chord-shape selection based on genre (open chords vs. barre), position tracking, capo suggestion, and rhythmic placement.
+
+Your request URL contains a list=RD… parameter.
+Without --no-playlist, yt-dlp treats this as a playlist and will:
+
+Resolve the entire “radio” list (often 50–100 videos).
+
+Download & transcode every entry—explaining the 90 s+ runtime and why the job hasn’t finished yet.
+
+Quick fixes
+Tell yt-dlp to ignore the playlist flag
+Change the command in AudioExtractor._run_cli:
+
+python
+Copy
+Edit
+cmd = [
+    "yt-dlp", "-q", "-x", "--audio-format", "wav",
+    "--no-playlist",                # ⬅️ ADD THIS
+    "-o", output_template,
+    youtube_url
+]
+Optional: strip the list= query param before you call yt-dlp.
+
+Capture stderr/stdout for easier debugging:
+
+python
+Copy
+Edit
+subprocess.run(cmd, check=True, capture_output=True, text=True)
+Then log e.stderr on failure.
+
+Disable the file-watch reloader inside the container**
+When you launch Uvicorn or FastAPI via Docker, use:
+
+bash
+Copy
+Edit
+uvicorn main:app --host 0.0.0.0 --port 5000 --workers 1  # no --reload
+The reload process is great locally but can terminate background tasks when it restarts on file changes (e.g., package install or temp-file writes).
+
+Limit parallel extractions
+If multiple users hit the same video you’ll spawn duplicate yt-dlp + ffmpeg conversions. Use a simple in-memory or Redis lock keyed by video URL—or cache the resulting WAV path—to avoid wasted work.
+

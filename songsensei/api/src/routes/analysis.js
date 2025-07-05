@@ -79,6 +79,19 @@ router.post('/analyze', async (req, res) => {
   }
 });
 
+// GET /api/analysis/analysis/:jobId - Fetch analysis results
+router.get('/analysis/:jobId', async (req, res) => {
+  const { jobId } = req.params;
+  logger.info('Fetching analysis results', { jobId });
+  try {
+    const analysisResp = await axios.get(`${process.env.ANALYSIS_SERVICE_URL}/analysis/${jobId}`);
+    return res.status(analysisResp.status).json(analysisResp.data);
+  } catch (err) {
+    logger.error('Error proxying analysis request', err);
+    return res.status(502).json({ error: 'Failed to proxy analysis request', message: err.message });
+  }
+});
+
 // GET /api/analysis/audio/:jobId - Stream audio for playback
 router.get('/audio/:jobId', async (req, res) => {
   const { jobId } = req.params;
