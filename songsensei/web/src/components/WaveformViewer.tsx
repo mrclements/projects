@@ -23,6 +23,8 @@ const WaveformViewer: React.FC<WaveformViewerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [duration, setDuration] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<number | null>(null);
 
 
   useEffect(() => {
@@ -64,7 +66,7 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
 
     canvas.width = width;
     canvas.height = height;
-    canvas.className = 'w-full h-full cursor-pointer';
+    canvas.className = `w-full h-full ${isDragging ? 'cursor-crosshair' : 'cursor-pointer'}`;
 
     // Clear canvas
     ctx.fillStyle = '#1f2937';
@@ -96,27 +98,45 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
     container.innerHTML = '';
     container.appendChild(canvas);
 
-    // Add click handler for selection
-    canvas.addEventListener('click', handleWaveformClick);
+    // Add mouse event handlers for drag selection
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('mouseleave', handleMouseUp);
   };
 
-  const handleWaveformClick = (e: MouseEvent) => {
-    if (!data || !waveformRef.current) return;
-
+  const getTimeFromMouseEvent = (e: MouseEvent): number => {
+    if (!data || !waveformRef.current) return 0;
+    
     const rect = waveformRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const clickTime = (x / rect.width) * data.duration;
+    const time = (x / rect.width) * data.duration;
+    
+    // Clamp to valid range
+    return Math.max(0, Math.min(data.duration, time));
+  };
 
-    if (!selection) {
-      // Start new selection
-      setSelection({ start: clickTime, end: clickTime + 10 }); // Default 10 second selection
-    } else {
-      // Adjust selection
-      if (Math.abs(clickTime - selection.start) < Math.abs(clickTime - selection.end)) {
-        setSelection({ ...selection, start: clickTime });
-      } else {
-        setSelection({ ...selection, end: clickTime });
-      }
+  const handleMouseDown = (e: MouseEvent) => {
+    const clickTime = getTimeFromMouseEvent(e);
+    setIsDragging(true);
+    setDragStart(clickTime);
+    setSelection({ start: clickTime, end: clickTime });
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging || dragStart === null) return;
+    
+    const currentTime = getTimeFromMouseEvent(e);
+    const start = Math.min(dragStart, currentTime);
+    const end = Math.max(dragStart, currentTime);
+    
+    setSelection({ start, end });
+  };
+
+  const handleMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDragStart(null);
     }
   };
 
@@ -200,9 +220,8 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
       {/* Instructions */}
       <div className="bg-gray-50 rounded-lg p-4">
         <p className="text-sm text-gray-600">
-          <strong>Instructions:</strong> Click on the waveform to set the start point, 
-          then click again to set the end point for analysis. Select a segment of 10-30 seconds 
-          for best results.
+          <strong>Instructions:</strong> Click and drag on the waveform to select a region 
+          for analysis. Select a segment of 10-30 seconds for best results.
         </p>
       </div>
     </div>

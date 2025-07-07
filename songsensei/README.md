@@ -87,15 +87,17 @@ docker-compose logs -f
 1. Open your browser to http://localhost:3000  
 2. In the **Load YouTube Video** form, paste a valid YouTube URL and click **Load & Extract Audio**.  
 3. You will see **Status: processing** as audio extraction begins (takes ~30–60s).  
-4. Once waveform data loads, a clickable waveform appears under **Trim Audio Segment**.  
-   - Click once to set start point, click again to set end point (default selection is 10s).  
+4. Once waveform data loads, an interactive waveform appears under **Trim Audio Segment**.  
+   - **Click and drag** on the waveform to select the region you want to analyze (10-30 seconds recommended).  
+   - The selection area will be highlighted in blue as you drag.  
+   - Use the Reset button to clear your selection and start over.  
 5. Under **Analyze Musical Content**, click **Analyze Chords & Tabs**.  
 6. You will see **Status: analyzing** (takes ~20–40s).  
 7. When complete, the **Analysis Results** section displays:  
    - Key, tempo, time signature  
    - Chord progression with timestamps  
    - Guitar tab measures  
-   - Confidence score  
+   - Confidence score
 
 ## Expected Output
 
