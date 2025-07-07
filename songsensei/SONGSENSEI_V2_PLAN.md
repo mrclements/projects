@@ -73,9 +73,30 @@ SongSensei V2 will transform from a local-only tool to a hybrid cloud-assisted p
 
 ## Sprint Development Plan
 
-### Sprint 1: Foundation & Monetization Infrastructure
-**Duration:** 2-3 days
-**Goal:** Establish V2 data model and payment infrastructure
+### Sprint 0: Quick Chord Analysis Fix (URGENT)
+**Goal:** Make the current version actually useful for guitarists
+
+#### Tasks:
+1. **Immediate Chord Analysis Improvements**
+   - [ ] Implement sliding window chord detection (0.5-1 second windows)
+   - [ ] Add chord confidence filtering to reduce noise
+   - [ ] Align chord changes with beat grid for musical timing
+   - [ ] Reduce minimum chord duration to 1-2 beats instead of 8+ seconds
+   - [ ] Improve chord smoothing to reduce flickering
+
+2. **Quick Usability Fixes**
+   - [ ] Show chord changes at musically relevant intervals
+   - [ ] Add chord confidence indicators in the UI
+   - [ ] Display chord changes aligned with beat positions
+
+#### Definition of Done:
+- Chord changes happen every 1-4 beats, not every 8+ seconds
+- Analysis produces guitarist-friendly chord progressions
+- Confidence filtering reduces noise in chord detection
+- Git commit: "Improved chord analysis timing for guitarists"
+
+### Sprint 1: Foundation & Data Model
+**Goal:** Establish V2 data model and prepare for cloud scalability
 
 #### Tasks:
 1. **Data Model Extension**
@@ -83,55 +104,66 @@ SongSensei V2 will transform from a local-only tool to a hybrid cloud-assisted p
    - [ ] Add `analysisVersion: "2.0"` to all responses
    - [ ] Create `segments[]`, `keyChanges[]`, `timeSigChanges[]` arrays
    - [ ] Add `tabs.gpFileUrl` and export format URLs
+   - [ ] Design for horizontal scaling and cloud integration
 
 2. **API Contract Updates**
    - [ ] Modify `/api/analysis/analyze` for V2 compatibility
    - [ ] Update `/api/analysis/status/:jobId` response structure
-   - [ ] Add feature flag system for free/premium features
+   - [ ] Add cloud service abstraction layer
+   - [ ] Implement async job processing foundation
 
-3. **Monetization Infrastructure**
-   - [ ] Integrate Stripe for payment processing
-   - [ ] Create user authentication system
-   - [ ] Implement usage tracking and limits
-   - [ ] Add subscription management
+3. **Cloud Service Preparation**
+   - [ ] Set up accounts on all free cloud services
+   - [ ] Create API keys and authentication tokens
+   - [ ] Test connectivity to each service
+   - [ ] Design service orchestration layer
 
 #### Definition of Done:
 - All new interfaces defined and tested
-- Payment integration working
-- Usage limits enforced
-- Git commit: "V2 foundation with monetization"
-
-#### Cloud Integration:
-- Set up accounts on all free cloud services
-- Create API keys and authentication tokens
-- Test connectivity to each service
+- Cloud service connections established
+- Scalable architecture foundation in place
+- Git commit: "V2 foundation with cloud scalability"
 
 ---
 
-### Sprint 2: Cloud-Assisted Analysis Core
-**Duration:** 3-4 days
-**Goal:** Implement advanced analysis using cloud services
+### Sprint 2: Cloud-Assisted Analysis Core + Source Separation
+**Goal:** Implement advanced analysis using cloud services with guitarist-focused improvements
 
 #### Tasks:
-1. **Song Structure Analysis (Google Colab)**
+1. **Source Separation for Clean Analysis (Hugging Face Spaces)**
+   - [ ] Deploy Spleeter model for vocal/drums/bass/other separation
+   - [ ] Create source separation API wrapper
+   - [ ] Implement fallback to DEMUCS for higher quality when needed
+   - [ ] Add local fallback that processes full mix
+   - [ ] Cache separated tracks to avoid reprocessing
+
+2. **Advanced Chord Analysis Pipeline**
+   - [ ] Implement sliding window chord detection on separated harmonic track
+   - [ ] Create beat-aligned chord change detection (every 0.25-1 beats)
+   - [ ] Add advanced confidence filtering and smoothing
+   - [ ] Implement chord transition probability modeling
+   - [ ] Add guitar-friendly chord voicing detection
+
+3. **Song Structure Analysis (Google Colab)**
    - [ ] Create Colab notebook for novelty curve detection
    - [ ] Implement self-similarity matrix analysis
    - [ ] Build section classification (Intro/Verse/Chorus/Bridge/Solo/Outro)
    - [ ] Create API wrapper for Colab integration
    - [ ] Add local fallback with simplified algorithm
 
-2. **Key & Modulation Detection (Render.com)**
+4. **Key & Modulation Detection (Render.com)**
    - [ ] Deploy key detection microservice to Render
-   - [ ] Implement sliding window key analysis
+   - [ ] Implement sliding window key analysis on separated tracks
    - [ ] Create modulation detection algorithm
    - [ ] Add confidence scoring
    - [ ] Implement local fallback for basic key detection
 
-3. **Integration & Orchestration**
+5. **Integration & Orchestration**
    - [ ] Create cloud service orchestration layer
    - [ ] Implement async processing with job queues
    - [ ] Add progress tracking for multi-step analysis
    - [ ] Handle cloud service failures gracefully
+   - [ ] Optimize processing pipeline for guitarist workflow
 
 #### Definition of Done:
 - Advanced analysis working via cloud services
