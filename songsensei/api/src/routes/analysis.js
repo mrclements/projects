@@ -13,7 +13,15 @@ const ingestSchema = Joi.object({
 const analyzeSchema = Joi.object({
   jobId: Joi.string().required(),
   startTime: Joi.number().min(0).required(),
-  endTime: Joi.number().min(0).required()
+  endTime: Joi.number().min(0).required(),
+  // V2 Extensions
+  analysisVersion: Joi.string().valid('1.0', '2.0').default('2.0'),
+  enableCloudServices: Joi.boolean().default(false),
+  cloudOptions: Joi.object({
+    sourceSeparation: Joi.boolean().default(false),
+    advancedStructure: Joi.boolean().default(false),
+    enhancedKeyDetection: Joi.boolean().default(false)
+  }).optional()
 }).custom((value, helpers) => {
   if (value.endTime <= value.startTime) {
     return helpers.error('any.invalid');
@@ -95,7 +103,11 @@ router.post('/analyze', async (req, res) => {
     const payload = {
       job_id: value.jobId,
       start_time: value.startTime,
-      end_time: value.endTime
+      end_time: value.endTime,
+      // V2 Extensions
+      analysis_version: value.analysisVersion,
+      enable_cloud_services: value.enableCloudServices,
+      cloud_options: value.cloudOptions || {}
     };
     logger.info('Forwarding to Analysis Service', payload);
 
@@ -143,6 +155,29 @@ router.get('/audio/:jobId', async (req, res) => {
   } catch (err) {
     logger.error('Error proxying audio request', err);
     return res.status(502).json({ error: 'Failed to proxy audio request', message: err.message });
+  }
+});
+
+// GET /api/analysis/cloud-status
+router.get('/cloud-status', async (req, res) => {
+  logger.info('Checking cloud service status');
+
+  try {
+    const statusResp = await axios.get(`${process.env.ANALYSIS_SERVICE_URL}/cloud-status`);
+    logger.info('Cloud status response', statusResp.data);
+    return res.status(statusResp.status).json(statusResp.data);
+  } catch (err) {
+    logger.error('Error checking cloud service status', err);
+    return res.status(502).json({ 
+      error: 'Failed to check cloud service status', 
+      message: err.message,
+      services: {
+        spleeter: { enabled: false, healthy: false, error: 'Service unavailable' },
+        colab: { enabled: false, healthy: false, error: 'Service unavailable' },
+        render: { enabled: false, healthy: false, error: 'Service unavailable' },
+        github_actions: { enabled: false, healthy: false, error: 'Service unavailable' }
+      }
+    });
   }
 });
 
