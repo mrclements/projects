@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import { api } from '../lib/api';
 import { Loader2 } from 'lucide-react';
 import { JobResponse } from '../types/analysis';
 
@@ -47,7 +47,7 @@ const YouTubeUrlInput: React.FC<YouTubeUrlInputProps> = ({
 
     setLoading(true);
     try {
-      const resp = await axios.post('/api/analysis/ingest', {
+      const resp = await api.post('/api/analysis/ingest', {
         youtube_url: url,
         user_consent: true
       });

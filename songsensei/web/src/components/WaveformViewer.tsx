@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
-import axios from 'axios';
+import { api } from '../lib/api';
 import { JobStatusResponse } from '../types/analysis';
 
 interface WaveformViewerProps {
@@ -36,7 +36,7 @@ const WaveformViewer: React.FC<WaveformViewerProps> = ({
     let intervalId: NodeJS.Timeout;
     intervalId = setInterval(async () => {
       try {
-const resp = await axios.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
+const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
         const { status, waveform_data } = resp.data;
         if (status === 'completed' && waveform_data) {
           onDataLoaded(waveform_data);

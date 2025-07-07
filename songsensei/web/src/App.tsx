@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import { api } from './lib/api';
 import { Music, Play } from 'lucide-react';
 import YouTubeUrlInput from './components/YouTubeUrlInput';
 import WaveformViewer from './components/WaveformViewer';
@@ -33,14 +33,14 @@ function App() {
     if (!currentJob || !trimSelection) return;
     setJobStatus('analyzing');
     try {
-      await axios.post('/api/analysis/analyze', {
+      await api.post('/api/analysis/analyze', {
         jobId: currentJob,
         startTime: trimSelection.start,
         endTime: trimSelection.end,
       });
       const interval = setInterval(async () => {
         try {
-          const resp = await axios.get<AnalysisResponse>(`/api/analysis/analysis/${currentJob}`);
+          const resp = await api.get<AnalysisResponse>(`/api/analysis/analysis/${currentJob}`);
           if (resp.data.status === 'completed' && resp.data.analysis) {
             setAnalysisResult(resp.data.analysis as AnalysisResult);
             setJobStatus('analyzed');
