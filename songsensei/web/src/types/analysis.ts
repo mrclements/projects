@@ -56,10 +56,9 @@ export interface AnalysisResult {
 }
 
 export interface JobResponse {
-  job_id: string;
-  status: string;
+  jobId: string;        // ✅ camel-case
+  status?: string;
   message?: string;
-  estimatedTime?: string;
 }
 
 export interface JobStatusResponse {

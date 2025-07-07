@@ -29,6 +29,7 @@ class AudioExtractor:
         # Build command to use system yt-dlp binary
         cmd = [
             "yt-dlp",
+            "--no-playlist",
             "-q",
             "-x",
             "--audio-format", "wav",
