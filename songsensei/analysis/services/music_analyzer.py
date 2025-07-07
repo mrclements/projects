@@ -93,14 +93,42 @@ class MusicAnalyzer:
             confidence = self._calculate_confidence(key_result, tempo_result, chords_result)
             
             analysis_result = {
+                # Core V1 fields
                 "key": key_result["key"],
                 "tempo": tempo_result["tempo"],
                 "time_signature": tempo_result.get("time_signature", "4/4"),
                 "confidence": confidence,
                 "chords": chords_result,
+                
+                # V2 Extensions
+                "analysisVersion": "2.0",
+                
+                # Song structure analysis (placeholder for now)
+                "segments": [],
+                
+                # Enhanced tracking
+                "key_changes": [],
+                "time_signature_changes": [],
+                "modulations": [],
+                
+                # Enhanced tab with export options
                 "tab": tab_result,
-                "key_changes": [],  # TODO: Implement key change detection
-                "modulations": []   # TODO: Implement modulation detection
+                
+                # Cloud processing metadata
+                "processing": {
+                    "cloudServices": [],
+                    "sourceSeparation": False,
+                    "processingTime": 0.0,
+                    "queuePosition": None
+                },
+                
+                # Quality metrics
+                "quality": {
+                    "chordAccuracy": confidence,
+                    "structureConfidence": 0.0,
+                    "keyStability": key_result.get("confidence", 0.5),
+                    "rhythmConsistency": tempo_result.get("confidence", 0.5)
+                }
             }
             
             logger.info(f"Analysis completed - Key: {key_result['key']}, Tempo: {tempo_result['tempo']}")
