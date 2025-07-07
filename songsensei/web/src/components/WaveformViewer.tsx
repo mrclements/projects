@@ -118,19 +118,76 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
 
   const handleMouseDown = (e: MouseEvent) => {
     const clickTime = getTimeFromMouseEvent(e);
+    
+    // Create an initial 10-second window centered on click point
+    // This makes selection easier and more predictable
+    const defaultDuration = 10; // 10 seconds window
+    let start = Math.max(0, clickTime - defaultDuration / 2);
+    let end = Math.min(data.duration, clickTime + defaultDuration / 2);
+    
+    // Adjust if we hit the boundaries
+    if (start === 0) {
+      // If we hit the left boundary, extend right to maintain 10s window
+      end = Math.min(data.duration, defaultDuration);
+    } else if (end === data.duration) {
+      // If we hit the right boundary, extend left to maintain 10s window
+      start = Math.max(0, data.duration - defaultDuration);
+    }
+    
     setIsDragging(true);
     setDragStart(clickTime);
-    setSelection({ start: clickTime, end: clickTime });
+    setSelection({ start, end });
   };
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!isDragging || dragStart === null) return;
     
     const currentTime = getTimeFromMouseEvent(e);
-    const start = Math.min(dragStart, currentTime);
-    const end = Math.max(dragStart, currentTime);
+    const minDuration = 5; // Minimum 5 seconds selection
+    const maxDuration = 30; // Maximum 30 seconds selection
     
-    setSelection({ start, end });
+    // Determine whether we're adjusting the start or end point
+    // If drag point is closer to start than end, adjust start; otherwise adjust end
+    const isAdjustingStart = Math.abs(currentTime - selection!.start) < Math.abs(currentTime - selection!.end);
+    
+    let newStart = selection!.start;
+    let newEnd = selection!.end;
+    
+    if (isAdjustingStart) {
+      // Adjusting start point
+      newStart = currentTime;
+      
+      // Ensure minimum duration
+      if (newEnd - newStart < minDuration) {
+        newStart = newEnd - minDuration;
+      }
+      
+      // Ensure maximum duration
+      if (newEnd - newStart > maxDuration) {
+        newStart = newEnd - maxDuration;
+      }
+      
+      // Ensure we don't go below 0
+      newStart = Math.max(0, newStart);
+    } else {
+      // Adjusting end point
+      newEnd = currentTime;
+      
+      // Ensure minimum duration
+      if (newEnd - newStart < minDuration) {
+        newEnd = newStart + minDuration;
+      }
+      
+      // Ensure maximum duration
+      if (newEnd - newStart > maxDuration) {
+        newEnd = newStart + maxDuration;
+      }
+      
+      // Ensure we don't go beyond duration
+      newEnd = Math.min(data.duration, newEnd);
+    }
+    
+    setSelection({ start: newStart, end: newEnd });
   };
 
   const handleMouseUp = () => {

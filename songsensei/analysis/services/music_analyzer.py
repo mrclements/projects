@@ -230,35 +230,230 @@ class MusicAnalyzer:
             }
     
     async def _analyze_chords(self, audio_segment: np.ndarray, start_time: float, end_time: float) -> List[Dict[str, Any]]:
-        """Analyze chord progression using madmom or fallback"""
+        """
+        Analyze chord progression using sliding window approach
+        Uses shorter windows and aligns with beat grid for musician-friendly results
+        """
         try:
-            if MADMOM_AVAILABLE:
-                # Use madmom chord recognition
-                chords = self.chord_processor(audio_segment)
+            # Detect beats for chord alignment
+            beat_times = await self._detect_beats(audio_segment, start_time)
+            
+            # If no beats detected, use regular intervals
+            if not beat_times:
+                logger.info("No beats detected, using regular intervals")
+                beat_interval = 0.5  # 0.5 second intervals
+                beat_times = np.arange(start_time, end_time, beat_interval)
+            
+            # Use sliding windows approach with window size and hop size
+            window_size_seconds = 1.0  # 1 second window for analysis
+            hop_size_seconds = 0.25    # 0.25 second hop size for smoother transitions
+            
+            # Convert to samples
+            window_size = int(window_size_seconds * self.sample_rate)
+            hop_size = int(hop_size_seconds * self.sample_rate)
+            
+            logger.info(f"Using sliding window: window_size={window_size_seconds}s, hop_size={hop_size_seconds}s")
+            
+            # Process using sliding windows
+            chord_list = []
+            current_position = 0
+            
+            # Process until we reach the end of the segment
+            while current_position + window_size <= len(audio_segment):
+                # Extract window
+                window = audio_segment[current_position:current_position + window_size]
                 
-                # Convert to our format
-                chord_list = []
-                segment_duration = end_time - start_time
+                # Calculate time for this window
+                window_time = start_time + (current_position / self.sample_rate)
                 
-                for i, chord_label in enumerate(chords):
-                    time_pos = start_time + (i / len(chords)) * segment_duration
-                    
+                # Analyze chord for this window
+                chord_label, confidence = self._analyze_window_chord(window)
+                
+                # Apply confidence threshold for quality filtering
+                if confidence >= 0.4:  # Only keep reasonably confident detections
                     chord_info = {
-                        "time": float(time_pos),
-                        "chord": str(chord_label),
-                        "confidence": 0.8,  # madmom doesn't provide individual confidence
-                        "is_diatonic": True  # TODO: Implement diatonic analysis
+                        "time": float(window_time),
+                        "chord": chord_label,
+                        "confidence": confidence,
+                        "is_diatonic": True  # Will be calculated later
                     }
                     chord_list.append(chord_info)
                 
-                return chord_list
-            else:
-                # Fallback: Generate simple chord progression
-                return self._generate_fallback_chords(start_time, end_time)
-                
+                # Move to next hop
+                current_position += hop_size
+            
+            # Post-processing: smooth chord transitions and align with beats
+            processed_chords = self._post_process_chords(chord_list, beat_times)
+            
+            # Return processed chords
+            return processed_chords
+            
         except Exception as e:
             logger.error(f"Error in chord analysis: {str(e)}")
             return self._generate_fallback_chords(start_time, end_time)
+    
+    async def _detect_beats(self, audio_segment: np.ndarray, start_time: float) -> List[float]:
+        """Detect beat positions for chord alignment"""
+        try:
+            if MADMOM_AVAILABLE:
+                # Use madmom for better beat tracking
+                from madmom.features.beats import RNNBeatProcessor, BeatTrackingProcessor
+                
+                # Process with madmom
+                rnn = RNNBeatProcessor()(audio_segment)
+                beats = BeatTrackingProcessor()(rnn)
+                
+                # Convert to our time reference
+                beat_times = [start_time + b for b in beats]
+                return beat_times
+            
+            elif ESSENTIA_AVAILABLE:
+                # Use Essentia for beat tracking
+                rhythm_extractor = es.RhythmExtractor2013()
+                bpm, beats, beat_confidence, _, _ = rhythm_extractor(audio_segment)
+                
+                # Convert to our time reference
+                beat_times = [start_time + b for b in beats]
+                return beat_times
+            
+            else:
+                # Fallback: Use librosa for beat tracking
+                tempo, beat_frames = librosa.beat.beat_track(y=audio_segment, sr=self.sample_rate)
+                beat_times = librosa.frames_to_time(beat_frames, sr=self.sample_rate)
+                
+                # Convert to our time reference
+                beat_times = [start_time + b for b in beat_times]
+                return beat_times
+                
+        except Exception as e:
+            logger.error(f"Error in beat detection: {str(e)}")
+            return []
+    
+    def _analyze_window_chord(self, window: np.ndarray) -> Tuple[str, float]:
+        """Analyze chord for a single window"""
+        try:
+            if MADMOM_AVAILABLE:
+                # Use madmom for better chord detection
+                chords = self.chord_processor(window)
+                
+                if len(chords) > 0:
+                    # Use the first chord (most prominent)
+                    chord_label = str(chords[0])
+                    
+                    # Estimate confidence based on chroma clarity
+                    chroma = librosa.feature.chroma_cqt(y=window, sr=self.sample_rate)
+                    max_val = np.max(np.mean(chroma, axis=1))
+                    min_val = np.min(np.mean(chroma, axis=1))
+                    clarity = (max_val - min_val) / (max_val + min_val + 1e-8)
+                    confidence = min(0.95, max(0.4, clarity))
+                    
+                    return chord_label, float(confidence)
+                
+                return "N", 0.0  # No chord
+                
+            elif ESSENTIA_AVAILABLE:
+                # Use Essentia for chord detection
+                key_detector = es.KeyExtractor()
+                key, scale, strength = key_detector(window)
+                
+                # Simple chord inference from key
+                if scale == 'major':
+                    chord_label = key
+                else:
+                    chord_label = f"{key}m"
+                
+                return chord_label, float(strength)
+                
+            else:
+                # Fallback: Use librosa for simple chord detection
+                chroma = librosa.feature.chroma_cqt(y=window, sr=self.sample_rate)
+                chroma_sum = np.sum(chroma, axis=1)
+                root_note = np.argmax(chroma_sum)
+                
+                # Simple major/minor detection based on third
+                third_major = (root_note + 4) % 12
+                third_minor = (root_note + 3) % 12
+                
+                if chroma_sum[third_major] > chroma_sum[third_minor]:
+                    quality = ""  # Major
+                else:
+                    quality = "m"  # Minor
+                
+                # Convert to chord name
+                notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+                chord_label = f"{notes[root_note]}{quality}"
+                
+                # Calculate confidence based on chroma clarity
+                max_val = np.max(chroma_sum)
+                min_val = np.min(chroma_sum)
+                clarity = (max_val - min_val) / (max_val + min_val + 1e-8)
+                confidence = min(0.8, max(0.4, clarity))
+                
+                return chord_label, float(confidence)
+                
+        except Exception as e:
+            logger.error(f"Error in window chord analysis: {str(e)}")
+            return "C", 0.5  # Default fallback
+    
+    def _post_process_chords(self, chord_list: List[Dict[str, Any]], beat_times: List[float]) -> List[Dict[str, Any]]:
+        """
+        Post-process chord list to:
+        1. Remove duplicate consecutive chords
+        2. Align chord changes with beats
+        3. Filter out very short chord segments
+        """
+        if not chord_list:
+            return []
+        
+        # Sort by time
+        chord_list.sort(key=lambda x: x["time"])
+        
+        # Align chord changes to nearest beat
+        if beat_times:
+            for chord in chord_list:
+                # Find closest beat
+                closest_beat = min(beat_times, key=lambda b: abs(b - chord["time"]))
+                chord["time"] = float(closest_beat)
+        
+        # Group by aligned time positions
+        chord_groups = {}
+        for chord in chord_list:
+            time_pos = chord["time"]
+            if time_pos not in chord_groups:
+                chord_groups[time_pos] = []
+            chord_groups[time_pos].append(chord)
+        
+        # For each group, select the chord with highest confidence
+        best_chords = []
+        for time_pos in sorted(chord_groups.keys()):
+            chords = chord_groups[time_pos]
+            best_chord = max(chords, key=lambda c: c["confidence"])
+            best_chords.append(best_chord)
+        
+        # Remove duplicates (same chord in consecutive positions)
+        processed_chords = []
+        prev_chord = None
+        min_duration = 0.25  # Minimum chord duration in seconds
+        
+        for i, chord in enumerate(best_chords):
+            # Check if this is a different chord from previous
+            if prev_chord is None or chord["chord"] != prev_chord["chord"]:
+                # Calculate end time (for duration checking)
+                if i < len(best_chords) - 1:
+                    next_time = best_chords[i+1]["time"]
+                    duration = next_time - chord["time"]
+                    
+                    # Only add if duration is long enough
+                    if duration >= min_duration:
+                        processed_chords.append(chord)
+                        prev_chord = chord
+                else:
+                    # Last chord, always add it
+                    processed_chords.append(chord)
+                    prev_chord = chord
+        
+        logger.info(f"Processed {len(chord_list)} raw chords into {len(processed_chords)} refined chords")
+        return processed_chords
     
     def _generate_fallback_chords(self, start_time: float, end_time: float) -> List[Dict[str, Any]]:
         """Generate a simple chord progression for fallback"""

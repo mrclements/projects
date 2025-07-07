@@ -4,11 +4,13 @@ from pydantic import BaseModel, HttpUrl
 from typing import List, Dict, Any, Optional
 import os
 import uuid
+import asyncio
 from loguru import logger
 
 from services.audio_extractor import AudioExtractor
 from services.music_analyzer import MusicAnalyzer
 from services.waveform_generator import WaveformGenerator
+from services.cloud_orchestrator import CloudOrchestrator
 from models.analysis_models import JobStatus, AnalysisResult, WaveformData
 
 app = FastAPI(
@@ -33,6 +35,7 @@ jobs: Dict[str, Dict[str, Any]] = {}
 audio_extractor = AudioExtractor()
 music_analyzer = MusicAnalyzer()
 waveform_generator = WaveformGenerator()
+cloud_orchestrator = CloudOrchestrator()
 
 class IngestRequest(BaseModel):
     youtube_url: HttpUrl
@@ -42,6 +45,10 @@ class AnalyzeRequest(BaseModel):
     job_id: str
     start_time: float
     end_time: float
+    # V2 Extensions
+    analysis_version: str = "2.0"
+    enable_cloud_services: bool = False
+    cloud_options: Dict[str, Any] = {}
 
 @app.get("/")
 async def root():
@@ -130,15 +137,23 @@ async def analyze_segment(request: AnalyzeRequest, background_tasks: BackgroundT
         
         # Update job status
         jobs[job_id]["analysis_status"] = "analyzing"
+        jobs[job_id]["analysis_config"] = {
+            "version": request.analysis_version,
+            "enable_cloud": request.enable_cloud_services,
+            "cloud_options": request.cloud_options
+        }
         
-        logger.info(f"Starting analysis for job {job_id}, segment {request.start_time}-{request.end_time}")
+        logger.info(f"Starting analysis for job {job_id}, segment {request.start_time}-{request.end_time}, version {request.analysis_version}")
         
-        # Start background analysis task
+        # Start background analysis task with V2 parameters
         background_tasks.add_task(
             analyze_audio_task,
             job_id,
             request.start_time,
-            request.end_time
+            request.end_time,
+            request.analysis_version,
+            request.enable_cloud_services,
+            request.cloud_options
         )
         
         return {
@@ -203,20 +218,85 @@ async def extract_audio_task(job_id: str, youtube_url: str):
             "error": str(e)
         })
 
-async def analyze_audio_task(job_id: str, start_time: float, end_time: float):
+@app.get("/cloud-status")
+async def cloud_service_status():
     """
-    Background task to analyze audio segment
+    Get status of all connected cloud services
     """
     try:
-        logger.info(f"Analyzing audio segment for job {job_id}")
+        status = cloud_orchestrator.get_service_status()
+        return {
+            "status": "healthy",
+            "services": status
+        }
+    except Exception as e:
+        logger.error(f"Error checking cloud service status: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "services": {}
+        }
+
+async def analyze_audio_task(
+    job_id: str, 
+    start_time: float, 
+    end_time: float, 
+    analysis_version: str = "2.0",
+    enable_cloud_services: bool = False,
+    cloud_options: Dict[str, Any] = {}
+):
+    """
+    Background task to analyze audio segment with V2 support
+    """
+    try:
+        logger.info(f"Analyzing audio segment for job {job_id} with V{analysis_version}")
         
         job = jobs[job_id]
         audio_path = job["audio_path"]
         
-        # Perform musical analysis
+        # Track processing start time
+        processing_start = asyncio.get_event_loop().time()
+        
+        # If cloud services are enabled, use cloud processing first
+        cloud_processing_result = None
+        if enable_cloud_services:
+            try:
+                logger.info(f"Using cloud services for job {job_id}")
+                cloud_processing_result = await cloud_orchestrator.process_with_orchestration(audio_path)
+                logger.info(f"Cloud processing completed for job {job_id}")
+            except Exception as e:
+                logger.error(f"Cloud processing failed: {str(e)}. Falling back to local processing.")
+        
+        # Perform local musical analysis
         analysis_result = await music_analyzer.analyze_segment(
             audio_path, start_time, end_time
         )
+        
+        # Enhance with cloud results if available
+        if cloud_processing_result:
+            # Add cloud-generated segments if they exist
+            if cloud_processing_result.get("song_structure", {}).get("segments"):
+                analysis_result["segments"] = cloud_processing_result["song_structure"]["segments"]
+            
+            # Add key changes and modulations if they exist
+            if cloud_processing_result.get("key_analysis", {}).get("key_changes"):
+                analysis_result["key_changes"] = cloud_processing_result["key_analysis"]["key_changes"]
+                
+            if cloud_processing_result.get("key_analysis", {}).get("modulations"):
+                analysis_result["modulations"] = cloud_processing_result["key_analysis"]["modulations"]
+            
+            # Add cloud processing metadata
+            if cloud_processing_result.get("processing_metadata"):
+                analysis_result["processing"] = cloud_processing_result["processing_metadata"]
+        
+        # Calculate total processing time
+        processing_time = asyncio.get_event_loop().time() - processing_start
+        if "processing" not in analysis_result:
+            analysis_result["processing"] = {}
+        analysis_result["processing"]["processingTime"] = processing_time
+        
+        # Set version
+        analysis_result["analysisVersion"] = analysis_version
         
         # Update job with analysis results
         jobs[job_id].update({
@@ -224,7 +304,7 @@ async def analyze_audio_task(job_id: str, start_time: float, end_time: float):
             "analysis_result": analysis_result
         })
         
-        logger.info(f"Analysis completed for job {job_id}")
+        logger.info(f"Analysis completed for job {job_id} in {processing_time:.2f}s")
         
     except Exception as e:
         logger.error(f"Error analyzing audio for job {job_id}: {str(e)}")
