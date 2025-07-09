@@ -3,6 +3,7 @@ const router = express.Router();
 const Joi = require('joi');
 const logger = require('../utils/logger');
 const axios = require('axios');
+const { v4: uuidv4 } = require('uuid');
 
 // Validation schema
 const ingestSchema = Joi.object({
@@ -177,6 +178,51 @@ router.get('/cloud-status', async (req, res) => {
         render: { enabled: false, healthy: false, error: 'Service unavailable' },
         github_actions: { enabled: false, healthy: false, error: 'Service unavailable' }
       }
+    });
+  }
+});
+
+// POST /api/analysis/separate-tracks
+router.post('/separate-tracks', async (req, res) => {
+  const { jobId, audioUrl } = req.body;
+  
+  if (!jobId || !audioUrl) {
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Missing required parameters' 
+    });
+  }
+  
+  logger.info('Separating audio tracks with Spleeter', { jobId });
+  
+  try {
+    // Call the analysis service with the Hugging Face token
+    const response = await axios.post(
+      `${process.env.ANALYSIS_SERVICE_URL}/separate-tracks`,
+      {
+        job_id: jobId,
+        audio_url: audioUrl
+      },
+      {
+        headers: {
+          'x-huggingface-token': process.env.HUGGINGFACE_API_TOKEN
+        }
+      }
+    );
+    
+    if (response.data && response.data.success) {
+      logger.info('Track separation successful', { jobId });
+      return res.status(200).json(response.data);
+    } else {
+      logger.warn('Track separation failed in analysis service', response.data);
+      return res.status(response.status).json(response.data);
+    }
+  } catch (err) {
+    logger.error('Error in track separation', err);
+    return res.status(502).json({
+      success: false,
+      error: 'Failed to process audio with Spleeter',
+      message: err.message
     });
   }
 });

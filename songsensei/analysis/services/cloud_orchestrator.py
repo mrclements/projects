@@ -64,14 +64,26 @@ class CloudOrchestrator:
         try:
             if not self.services[service]["enabled"]:
                 return False
-                
-            # Simple health check (can be enhanced per service)
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(
-                    f"{self.services[service]['base_url']}/health",
-                    headers={"Authorization": f"Bearer {self.services[service]['api_key']}"}
-                )
-                healthy = response.status_code == 200
+            
+            # Different health check approaches based on service type
+            if service == CloudService.SPLEETER:
+                # For Gradio-based Hugging Face Spaces, just check if the API endpoint exists
+                # Gradio doesn't have a dedicated health endpoint
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    # Make a HEAD request to check if the endpoint exists
+                    response = await client.head(
+                        self.services[service]['base_url'],
+                        headers={"Authorization": f"Bearer {self.services[service]['api_key']}"}
+                    )
+                    healthy = 200 <= response.status_code < 500  # Any non-5xx response is good enough
+            else:
+                # Default health check for other services
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(
+                        f"{self.services[service]['base_url']}/health",
+                        headers={"Authorization": f"Bearer {self.services[service]['api_key']}"}
+                    )
+                    healthy = response.status_code == 200
                 
             self.service_health[service] = {
                 "healthy": healthy,
@@ -107,29 +119,45 @@ class CloudOrchestrator:
             return await self._local_source_separation_fallback(audio_path)
     
     async def _cloud_source_separation(self, audio_path: str) -> Dict[str, Any]:
-        """Perform source separation using cloud service"""
+        """Perform source separation using cloud service with Gradio API"""
         try:
             # Read audio file
             with open(audio_path, 'rb') as f:
                 audio_data = f.read()
             
+            # For Gradio API in Hugging Face Spaces, the endpoint is /api/predict
+            # and we need to format the request differently
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
-                    f"{self.services[CloudService.SPLEETER]['base_url']}/separate",
-                    files={"audio": audio_data},
+                    f"{self.services[CloudService.SPLEETER]['base_url']}",
+                    files={"data": ("audio.wav", audio_data, "audio/wav")},
                     headers={"Authorization": f"Bearer {self.services[CloudService.SPLEETER]['api_key']}"}
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
-                    return {
-                        "vocals_path": result.get("vocals_url"),
-                        "drums_path": result.get("drums_url"),
-                        "bass_path": result.get("bass_url"),
-                        "other_path": result.get("other_url"),  # Harmonic content
-                        "success": True,
-                        "cloud_service": CloudService.SPLEETER
-                    }
+                    # Handle Gradio API response format which might be nested
+                    # The output will contain URLs to each stem
+                    if isinstance(result, list) and len(result) >= 4:
+                        # For Gradio interface that returns a list of outputs
+                        return {
+                            "vocals_path": result[0] if result[0] else None,
+                            "drums_path": result[1] if result[1] else None,
+                            "bass_path": result[2] if result[2] else None,
+                            "other_path": result[3] if result[3] else None,  # Harmonic content
+                            "success": True,
+                            "cloud_service": CloudService.SPLEETER
+                        }
+                    else:
+                        # Standard API response with named fields
+                        return {
+                            "vocals_path": result.get("vocals_url"),
+                            "drums_path": result.get("drums_url"),
+                            "bass_path": result.get("bass_url"),
+                            "other_path": result.get("other_url"),  # Harmonic content
+                            "success": True,
+                            "cloud_service": CloudService.SPLEETER
+                        }
                 else:
                     raise Exception(f"Cloud service returned {response.status_code}")
                     
@@ -141,17 +169,48 @@ class CloudOrchestrator:
         """Fallback to local processing when cloud services unavailable"""
         logger.info("Using local fallback for source separation")
         
-        # For now, just return the original audio path for all tracks
-        # In the future, this could use a lightweight local separation model
-        return {
-            "vocals_path": None,
-            "drums_path": None, 
-            "bass_path": None,
-            "other_path": audio_path,  # Use full mix as harmonic content
-            "success": True,
-            "cloud_service": None,
-            "fallback": True
-        }
+        try:
+            # Simple local separation for basic harmonic/percussive separation
+            # Much less effective than Spleeter but better than nothing
+            import librosa
+            y, sr = librosa.load(audio_path, sr=None)
+            
+            # Harmonic-percussive separation (not as good as Spleeter but available locally)
+            harmonic, percussive = librosa.effects.hpss(y)
+            
+            # Create temp files for the separated tracks
+            import os
+            import soundfile as sf
+            
+            base_dir = os.path.dirname(audio_path)
+            harmonic_path = os.path.join(base_dir, "harmonic.wav")
+            percussive_path = os.path.join(base_dir, "percussive.wav")
+            
+            # Save the separated tracks
+            sf.write(harmonic_path, harmonic, sr)
+            sf.write(percussive_path, percussive, sr)
+            
+            return {
+                "vocals_path": None,  # Can't separate vocals with HPSS
+                "drums_path": percussive_path,  # Percussive content
+                "bass_path": None,  # Can't separate bass with HPSS
+                "other_path": harmonic_path,  # Harmonic content for chord detection
+                "success": True,
+                "cloud_service": None,
+                "fallback": True
+            }
+        except Exception as e:
+            logger.error(f"Local separation fallback failed: {str(e)}")
+            # If even the local separation fails, just use the original audio
+            return {
+                "vocals_path": None,
+                "drums_path": None, 
+                "bass_path": None,
+                "other_path": audio_path,  # Use full mix as harmonic content
+                "success": True,
+                "cloud_service": None,
+                "fallback": True
+            }
     
     async def analyze_song_structure(self, audio_path: str) -> Dict[str, Any]:
         """

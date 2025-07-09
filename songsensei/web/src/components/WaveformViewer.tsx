@@ -1,14 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
 import { api } from '../lib/api';
-import { JobStatusResponse } from '../types/analysis';
+import { JobStatusResponse, WaveformData } from '../types/analysis';
 
 interface WaveformViewerProps {
   jobId: string | null;
-  data: any;
-  onDataLoaded: (data: any) => void;
+  data: WaveformData | null;
+  onDataLoaded: (data: WaveformData) => void;
   onTrimSelection: (start: number, end: number) => void;
   isLoading: boolean;
+}
+
+interface SelectionRange {
+  start: number;
+  end: number;
 }
 
 const WaveformViewer: React.FC<WaveformViewerProps> = ({
@@ -21,7 +27,7 @@ const WaveformViewer: React.FC<WaveformViewerProps> = ({
   const waveformRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+  const [selection, setSelection] = useState<SelectionRange | null>(null);
   const [duration, setDuration] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<number | null>(null);
@@ -53,7 +59,7 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
     return () => clearInterval(intervalId);
   }, [jobId, data, isLoading, onDataLoaded]);
 
-  const renderWaveform = () => {
+  const renderWaveform = (): void => {
     if (!waveformRef.current || !data) return;
 
     const canvas = document.createElement('canvas');
@@ -86,9 +92,10 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
     });
 
     // Draw selection overlay
-    if (selection) {
-      const startX = (selection.start / data.duration) * width;
-      const endX = (selection.end / data.duration) * width;
+    if (selection && data) {
+      const audioDuration = data.duration;
+      const startX = (selection.start / audioDuration) * width;
+      const endX = (selection.end / audioDuration) * width;
       
       ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
       ctx.fillRect(startX, 0, endX - startX, height);
@@ -105,95 +112,88 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
     canvas.addEventListener('mouseleave', handleMouseUp);
   };
 
-  const getTimeFromMouseEvent = (e: MouseEvent): number => {
+  const getTimeFromMouseEvent = (e: MouseEvent | ReactMouseEvent): number => {
     if (!data || !waveformRef.current) return 0;
     
+    const audioDuration = data.duration; // Store in local variable for TypeScript
     const rect = waveformRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const time = (x / rect.width) * data.duration;
+    const time = (x / rect.width) * audioDuration;
     
     // Clamp to valid range
-    return Math.max(0, Math.min(data.duration, time));
+    return Math.max(0, Math.min(audioDuration, time));
   };
 
-  const handleMouseDown = (e: MouseEvent) => {
+  const handleMouseDown = (e: MouseEvent): void => {
     const clickTime = getTimeFromMouseEvent(e);
     
-    // Create an initial 10-second window centered on click point
-    // This makes selection easier and more predictable
-    const defaultDuration = 10; // 10 seconds window
-    let start = Math.max(0, clickTime - defaultDuration / 2);
-    let end = Math.min(data.duration, clickTime + defaultDuration / 2);
-    
-    // Adjust if we hit the boundaries
-    if (start === 0) {
-      // If we hit the left boundary, extend right to maintain 10s window
-      end = Math.min(data.duration, defaultDuration);
-    } else if (end === data.duration) {
-      // If we hit the right boundary, extend left to maintain 10s window
-      start = Math.max(0, data.duration - defaultDuration);
-    }
-    
+    // Instead of creating a fixed-size window, set both start and end to the click point
+    // This will allow the user to drag to define the actual selection size
     setIsDragging(true);
     setDragStart(clickTime);
+    
+    // Initialize selection to a zero-length selection at click point
+    // It will be expanded as the user drags
+    setSelection({ start: clickTime, end: clickTime });
+  };
+
+  const handleMouseMove = (e: MouseEvent): void => {
+    if (!isDragging || dragStart === null || !data) return;
+    
+    const currentTime = getTimeFromMouseEvent(e);
+    const maxDuration = 30; // Maximum 30 seconds selection
+    const audioDuration = data.duration; // Store duration in local variable to satisfy TypeScript
+    
+    // Use the initial click position as the anchor point
+    // and the current mouse position as the moving point
+    let start = Math.min(dragStart, currentTime);
+    let end = Math.max(dragStart, currentTime);
+    
+    // Ensure selection doesn't exceed maximum duration
+    if (end - start > maxDuration) {
+      if (currentTime > dragStart) {
+        // If dragging to the right (expanding end)
+        end = start + maxDuration;
+      } else {
+        // If dragging to the left (expanding start)
+        start = end - maxDuration;
+      }
+    }
+    
+    // Ensure we don't go beyond boundaries
+    start = Math.max(0, start);
+    end = Math.min(audioDuration, end);
+    
     setSelection({ start, end });
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isDragging || dragStart === null) return;
-    
-    const currentTime = getTimeFromMouseEvent(e);
-    const minDuration = 5; // Minimum 5 seconds selection
-    const maxDuration = 30; // Maximum 30 seconds selection
-    
-    // Determine whether we're adjusting the start or end point
-    // If drag point is closer to start than end, adjust start; otherwise adjust end
-    const isAdjustingStart = Math.abs(currentTime - selection!.start) < Math.abs(currentTime - selection!.end);
-    
-    let newStart = selection!.start;
-    let newEnd = selection!.end;
-    
-    if (isAdjustingStart) {
-      // Adjusting start point
-      newStart = currentTime;
-      
-      // Ensure minimum duration
-      if (newEnd - newStart < minDuration) {
-        newStart = newEnd - minDuration;
-      }
-      
-      // Ensure maximum duration
-      if (newEnd - newStart > maxDuration) {
-        newStart = newEnd - maxDuration;
-      }
-      
-      // Ensure we don't go below 0
-      newStart = Math.max(0, newStart);
-    } else {
-      // Adjusting end point
-      newEnd = currentTime;
-      
-      // Ensure minimum duration
-      if (newEnd - newStart < minDuration) {
-        newEnd = newStart + minDuration;
-      }
-      
-      // Ensure maximum duration
-      if (newEnd - newStart > maxDuration) {
-        newEnd = newStart + maxDuration;
-      }
-      
-      // Ensure we don't go beyond duration
-      newEnd = Math.min(data.duration, newEnd);
-    }
-    
-    setSelection({ start: newStart, end: newEnd });
-  };
-
-  const handleMouseUp = () => {
-    if (isDragging) {
+  const handleMouseUp = (): void => {
+    if (isDragging && selection && data) {
       setIsDragging(false);
       setDragStart(null);
+      
+      // Check if the selection is too small (less than 1 second)
+      // This prevents accidental clicks from creating tiny selections
+      if (selection.end - selection.start < 1) {
+        // If it's basically a click (very small selection), either:
+        // 1. Clear the selection if we want clicks to reset, or
+        // 2. Create a reasonable default selection around the click point
+        const clickPoint = selection.start;
+        const minDuration = 5; // Minimum 5 seconds for a good analysis
+        const audioDuration = data.duration; // Store duration in local variable
+        
+        // Create a 5-second selection centered on the click point
+        let start = Math.max(0, clickPoint - (minDuration / 2));
+        let end = start + minDuration;
+        
+        // If the end would go beyond the duration, shift the window back
+        if (end > audioDuration) {
+          end = audioDuration;
+          start = Math.max(0, end - minDuration);
+        }
+        
+        setSelection({ start, end });
+      }
     }
   };
 
@@ -210,9 +210,16 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const resetSelection = () => {
+  const resetSelection = (): void => {
     setSelection(null);
     renderWaveform();
+  };
+  
+  const selectFullTrack = (): void => {
+    if (data && data.duration) {
+      setSelection({ start: 0, end: data.duration });
+      renderWaveform();
+    }
   };
 
   if (isLoading) {
@@ -271,15 +278,22 @@ const resp = await api.get<JobStatusResponse>(`/api/analysis/status/${jobId}`);
               </button>
             </>
           )}
+          <button onClick={selectFullTrack} className="btn-outline bg-blue-50">
+            <span className="mr-1">🎵</span>
+            Full Track
+          </button>
         </div>
       </div>
 
       {/* Instructions */}
       <div className="bg-gray-50 rounded-lg p-4">
-        <p className="text-sm text-gray-600">
-          <strong>Instructions:</strong> Click and drag on the waveform to select a region 
-          for analysis. Select a segment of 10-30 seconds for best results.
-        </p>
+      <p className="text-sm text-gray-600">
+        <strong>Instructions:</strong> Click and drag on the waveform to select a region 
+        for analysis. The selection will be highlighted in blue. For a precise selection, 
+        click where you want to start and drag to where you want to end. 
+        For best results, select a segment of 5-30 seconds, or use the "Full Track" 
+        button to analyze the entire audio.
+      </p>
       </div>
     </div>
   );

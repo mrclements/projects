@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from typing import List, Dict, Any, Optional
@@ -22,7 +23,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:4000"],
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -236,6 +237,64 @@ async def cloud_service_status():
             "message": str(e),
             "services": {}
         }
+
+class SeparateTracksRequest(BaseModel):
+    job_id: str
+    audio_url: str
+
+@app.post("/separate-tracks")
+async def separate_audio_tracks(request: SeparateTracksRequest, req: fastapi.Request):
+    """
+    Separate audio tracks using Spleeter (vocals, drums, bass, other)
+    """
+    try:
+        job_id = request.job_id
+        
+        if job_id not in jobs:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = jobs[job_id]
+        audio_path = job.get("audio_path")
+        
+        if not audio_path or not os.path.exists(audio_path):
+            raise HTTPException(status_code=400, detail="Audio file not found")
+        
+        # Get Hugging Face token from request headers
+        huggingface_token = None
+        try:
+            huggingface_token = req.headers.get("x-huggingface-token", "")
+            logger.info(f"Got Hugging Face token: {'*' * min(len(huggingface_token), 5) if huggingface_token else 'None'}")
+        except Exception as e:
+            logger.warning(f"Could not extract Hugging Face token: {str(e)}")
+        
+        # Set token if provided
+        if huggingface_token:
+            os.environ["HUGGINGFACE_API_TOKEN"] = huggingface_token
+        
+        # Process with Spleeter via Cloud Orchestrator
+        separation_result = await cloud_orchestrator.separate_sources(audio_path)
+        
+        if not separation_result.get("success"):
+            raise HTTPException(status_code=500, detail="Track separation failed")
+            
+        # Return URLs to the separated tracks
+        return {
+            "success": True,
+            "tracks": {
+                "vocals": separation_result.get("vocals_path"),
+                "drums": separation_result.get("drums_path"),
+                "bass": separation_result.get("bass_path"),
+                "other": separation_result.get("other_path")
+            },
+            "cloud_service": separation_result.get("cloud_service"),
+            "fallback": separation_result.get("fallback", False)
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error separating tracks: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def analyze_audio_task(
     job_id: str, 

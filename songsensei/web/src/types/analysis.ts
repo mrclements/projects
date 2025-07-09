@@ -137,3 +137,46 @@ export interface ApiError {
   message: string;
   details?: any;
 }
+
+// Cloud Services Interfaces
+export interface CloudServiceHealth {
+  enabled: boolean;
+  healthy: boolean;
+  last_check?: number;
+  error?: string;
+}
+
+export interface CloudServiceStatus {
+  status: 'healthy' | 'error';
+  message?: string;
+  services: {
+    spleeter: CloudServiceHealth;
+    colab: CloudServiceHealth;
+    render: CloudServiceHealth;
+    github_actions: CloudServiceHealth;
+    [key: string]: CloudServiceHealth;
+  };
+}
+
+export interface CloudOptions {
+  sourceSeparation?: boolean;
+  advancedStructure?: boolean;
+  enhancedKeyDetection?: boolean;
+  [key: string]: boolean | undefined;
+}
+
+// Spleeter Interfaces
+export interface SpleeterTracks {
+  vocals?: string;
+  drums?: string;
+  bass?: string;
+  other?: string;
+}
+
+export interface SpleeterResponse {
+  success: boolean;
+  tracks?: SpleeterTracks;
+  cloud_service?: string;
+  fallback?: boolean;
+  error?: string;
+}
