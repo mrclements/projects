@@ -238,14 +238,169 @@ async def cloud_service_status():
             "services": {}
         }
 
+@app.post("/wake-spaces")
+async def wake_hf_spaces(req: fastapi.Request):
+    """
+    Ping Hugging Face spaces to wake them up and get them ready for use
+    """
+    try:
+        import httpx
+        from datetime import datetime
+        
+        # Get environment variables
+        spleeter_url = os.environ.get("HUGGINGFACE_SPLEETER_URL")
+        demucs_url = os.environ.get("HUGGINGFACE_DEMUCS_URL")
+        
+        # Get Hugging Face token from request headers with fallback to environment variable
+        huggingface_token = None
+        try:
+            # Try to get token from headers first
+            huggingface_token = req.headers.get("x-huggingface-token", "")
+            
+            # If not in headers, try to get from environment as fallback
+            if not huggingface_token:
+                huggingface_token = os.environ.get("HUGGINGFACE_API_TOKEN", "")
+                logger.info(f"Using environment token for wake-up: {'*' * min(len(huggingface_token), 5) if huggingface_token else 'None'}")
+            else:
+                logger.info(f"Using header token for wake-up: {'*' * min(len(huggingface_token), 5) if huggingface_token else 'None'}")
+        except Exception as e:
+            logger.warning(f"Could not extract Hugging Face token: {str(e)}")
+            huggingface_token = os.environ.get("HUGGINGFACE_API_TOKEN", "")
+        
+        # Check if cloud services are enabled
+        cloud_enabled = os.environ.get("ENABLE_CLOUD_SERVICES", "false").lower() == "true"
+        if not cloud_enabled:
+            logger.info("Cloud services are disabled in configuration. Skipping wakeup.")
+            return {
+                "spleeter": False,
+                "demucs": False,
+                "enabled": False,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        # Prepare for requests
+        headers = {}
+        if huggingface_token:
+            headers["Authorization"] = f"Bearer {huggingface_token}"
+            
+        # Function to ping a space
+        async def ping_space(client, space_url, space_name):
+            if not space_url:
+                logger.warning(f"No URL provided for {space_name}")
+                return False
+
+            # Ensure URL ends with a trailing slash for API compatibility
+            if not space_url.endswith("/"):
+                space_url = f"{space_url}/"
+
+            # Add the health endpoint
+            if not space_url.endswith("api/health") and not space_url.endswith("api/health/"):
+                if "api/" in space_url:
+                    health_url = f"{space_url}health"
+                else:
+                    health_url = f"{space_url}api/health"
+            else:
+                health_url = space_url
+
+            try:
+                logger.info(f"Pinging {space_name} at {health_url}")
+                response = await client.get(health_url, headers=headers, timeout=30.0)
+                
+                if response.status_code == 200:
+                    logger.info(f"Successfully pinged {space_name}: {response.text}")
+                    return True
+                else:
+                    logger.error(f"Failed to ping {space_name}: Status {response.status_code}, {response.text}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error pinging {space_name}: {str(e)}")
+                return False
+
+        # Ping the spaces
+        async with httpx.AsyncClient() as client:
+            spleeter_status = await ping_space(client, spleeter_url, "Spleeter Space")
+            demucs_status = await ping_space(client, demucs_url, "Demucs Space")
+            
+            return {
+                "spleeter": spleeter_status,
+                "demucs": demucs_status,
+                "enabled": True,
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Error waking up Hugging Face spaces: {str(e)}")
+        return {
+            "error": str(e),
+            "spleeter": False,
+            "demucs": False,
+            "enabled": True,
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/debug/check-service/{service_name}")
+async def debug_check_service(service_name: str):
+    """
+    Manually trigger a health check for a specific service - for debugging purposes
+    """
+    try:
+        from services.cloud_orchestrator import CloudService
+        
+        # Validate service name
+        try:
+            service = CloudService(service_name.lower())
+        except ValueError:
+            valid_services = [s.value for s in CloudService]
+            return {
+                "status": "error",
+                "message": f"Invalid service name. Valid options are: {valid_services}"
+            }
+            
+        # Trigger a fresh health check
+        logger.info(f"Manually triggering health check for {service_name}")
+        
+        # Check service configuration
+        service_config = cloud_orchestrator.services.get(service, {})
+        base_url = service_config.get("base_url", "")
+        is_enabled = service_config.get("enabled", False)
+        api_key = service_config.get("api_key", "")
+        api_key_masked = f"{'*' * min(len(api_key), 5)}" if api_key else "None"
+        
+        # Diagnostic info
+        diagnostics = {
+            "service": service_name,
+            "enabled": is_enabled,
+            "base_url": base_url,
+            "api_key_present": bool(api_key),
+            "api_key_preview": api_key_masked,
+            "env_token": os.environ.get("HUGGINGFACE_API_TOKEN", "")[:3] + "..." if os.environ.get("HUGGINGFACE_API_TOKEN") else "None"
+        }
+        
+        # Perform health check
+        health_result = await cloud_orchestrator.health_check(service)
+        
+        return {
+            "status": "success",
+            "health_check_result": health_result,
+            "diagnostics": diagnostics,
+            "service_config": service_config,
+            "message": f"Health check for {service_name}: {'PASSED' if health_result else 'FAILED'}"
+        }
+    except Exception as e:
+        logger.error(f"Error running debug health check: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 class SeparateTracksRequest(BaseModel):
     job_id: str
     audio_url: str
+    model: str = "demucs"  # Default to Demucs v4, can be "demucs" or "spleeter"
 
 @app.post("/separate-tracks")
 async def separate_audio_tracks(request: SeparateTracksRequest, req: fastapi.Request):
     """
-    Separate audio tracks using Spleeter (vocals, drums, bass, other)
+    Separate audio tracks using Demucs v4 or Spleeter (vocals, drums, bass, other)
     """
     try:
         job_id = request.job_id
@@ -259,33 +414,45 @@ async def separate_audio_tracks(request: SeparateTracksRequest, req: fastapi.Req
         if not audio_path or not os.path.exists(audio_path):
             raise HTTPException(status_code=400, detail="Audio file not found")
         
-        # Get Hugging Face token from request headers
+        # Get Hugging Face token from request headers with fallback to environment variable
         huggingface_token = None
         try:
+            # Try to get token from headers first
             huggingface_token = req.headers.get("x-huggingface-token", "")
-            logger.info(f"Got Hugging Face token: {'*' * min(len(huggingface_token), 5) if huggingface_token else 'None'}")
+            
+            # If not in headers, try to get from environment as fallback
+            if not huggingface_token:
+                huggingface_token = os.environ.get("HUGGINGFACE_API_TOKEN", "")
+                logger.info(f"Using environment token: {'*' * min(len(huggingface_token), 5) if huggingface_token else 'None'}")
+            else:
+                logger.info(f"Using header token: {'*' * min(len(huggingface_token), 5) if huggingface_token else 'None'}")
         except Exception as e:
             logger.warning(f"Could not extract Hugging Face token: {str(e)}")
+            # Still try to get from environment in case of exception
+            huggingface_token = os.environ.get("HUGGINGFACE_API_TOKEN", "")
         
-        # Set token if provided
-        if huggingface_token:
-            os.environ["HUGGINGFACE_API_TOKEN"] = huggingface_token
+        # Always set the token (either from header or environment)
+        os.environ["HUGGINGFACE_API_TOKEN"] = huggingface_token
         
-        # Process with Spleeter via Cloud Orchestrator
+        # Process with Demucs v4 (default) or Spleeter via Cloud Orchestrator
         separation_result = await cloud_orchestrator.separate_sources(audio_path)
         
         if not separation_result.get("success"):
             raise HTTPException(status_code=500, detail="Track separation failed")
             
+        # Create a dynamic tracks dictionary from all stems
+        tracks = {}
+        for key, value in separation_result.items():
+            # Include only path fields, filter out metadata fields
+            if key.endswith("_path") and value:
+                # Extract the stem name from key (e.g., "vocals_path" -> "vocals")
+                stem_name = key.replace("_path", "")
+                tracks[stem_name] = value
+        
         # Return URLs to the separated tracks
         return {
             "success": True,
-            "tracks": {
-                "vocals": separation_result.get("vocals_path"),
-                "drums": separation_result.get("drums_path"),
-                "bass": separation_result.get("bass_path"),
-                "other": separation_result.get("other_path")
-            },
+            "tracks": tracks,
             "cloud_service": separation_result.get("cloud_service"),
             "fallback": separation_result.get("fallback", False)
         }

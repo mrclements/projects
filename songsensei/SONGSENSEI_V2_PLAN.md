@@ -113,10 +113,10 @@ SongSensei V2 will transform from a local-only tool to a hybrid cloud-assisted p
    - [ ] Implement async job processing foundation
 
 3. **Cloud Service Preparation**
-   - [ ] Set up accounts on all free cloud services
-   - [ ] Create API keys and authentication tokens
-   - [ ] Test connectivity to each service
-   - [ ] Design service orchestration layer
+   - [x] Set up accounts on all free cloud services
+   - [x] Create API keys and authentication tokens
+   - [x] Test connectivity to each service
+   - [x] Design service orchestration layer
 
 #### Definition of Done:
 - All new interfaces defined and tested
@@ -159,10 +159,10 @@ SongSensei V2 will transform from a local-only tool to a hybrid cloud-assisted p
    - [ ] Implement local fallback for basic key detection
 
 5. **Integration & Orchestration**
-   - [ ] Create cloud service orchestration layer
+   - [x] Create cloud service orchestration layer
    - [ ] Implement async processing with job queues
    - [ ] Add progress tracking for multi-step analysis
-   - [ ] Handle cloud service failures gracefully
+   - [x] Handle cloud service failures gracefully
    - [ ] Optimize processing pipeline for guitarist workflow
 
 #### Definition of Done:
@@ -429,10 +429,10 @@ const features = {
 ## Development Environment Setup
 
 ### Required Accounts
-- [ ] Google account for Colab access
-- [ ] Hugging Face account for model hosting
-- [ ] Render.com account for microservices
-- [ ] GitHub account for Actions
+- [x] Google account for Colab access
+- [x] Hugging Face account for model hosting
+- [x] Render.com account for microservices
+- [x] GitHub account for Actions
 - [ ] Stripe account for payments
 
 ### Local Development

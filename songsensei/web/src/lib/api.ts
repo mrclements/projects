@@ -5,11 +5,35 @@ import { AnalysisResult } from '../types/analysis';
 export interface CloudServiceStatus {
   status: string;
   services: {
+    demucs: { enabled: boolean; healthy: boolean; error?: string };
     spleeter: { enabled: boolean; healthy: boolean; error?: string };
     colab: { enabled: boolean; healthy: boolean; error?: string };
     render: { enabled: boolean; healthy: boolean; error?: string };
     github_actions: { enabled: boolean; healthy: boolean; error?: string };
   };
+}
+
+export interface WakeSpacesResult {
+  success: boolean;
+  enabled: boolean;
+  spleeter: boolean;
+  demucs: boolean;
+  timestamp: string;
+  message?: string;
+  error?: string;
+}
+
+export enum SeparationModel {
+  DEMUCS = 'demucs',
+  SPLEETER = 'spleeter'
+}
+
+export interface SeparatedTracks {
+  success: boolean;
+  tracks: Record<string, string>; // Map of track name to URL
+  cloud_service?: string;
+  fallback?: boolean;
+  error?: string; // Error message if separation failed
 }
 
 export interface CloudOptions {
@@ -62,5 +86,24 @@ export const getAnalysisResult = async (jobId: string) => {
 
 export const getCloudStatus = async (): Promise<CloudServiceStatus> => {
   const response = await api.get<CloudServiceStatus>('/api/analysis/cloud-status');
+  return response.data;
+};
+
+export const wakeHuggingFaceSpaces = async (): Promise<WakeSpacesResult> => {
+  const response = await api.post<WakeSpacesResult>('/api/analysis/wake-spaces');
+  return response.data;
+};
+
+// Track separation function
+export const separateTracks = async (
+  jobId: string,
+  audioUrl: string,
+  model: SeparationModel = SeparationModel.DEMUCS
+): Promise<SeparatedTracks> => {
+  const response = await api.post<SeparatedTracks>('/api/analysis/separate-tracks', {
+    jobId,
+    audioUrl,
+    model
+  });
   return response.data;
 };

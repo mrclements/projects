@@ -4,6 +4,11 @@ uvicorn[standard]==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
 
+# Source separation
+demucs>=4.0.0
+torchaudio>=2.0.0
+torch>=2.0.0
+
 # Audio processing and music analysis
 yt-dlp>=2024.05.01
 librosa==0.10.1

@@ -173,6 +173,7 @@ router.get('/cloud-status', async (req, res) => {
       error: 'Failed to check cloud service status', 
       message: err.message,
       services: {
+        demucs: { enabled: false, healthy: false, error: 'Service unavailable' },
         spleeter: { enabled: false, healthy: false, error: 'Service unavailable' },
         colab: { enabled: false, healthy: false, error: 'Service unavailable' },
         render: { enabled: false, healthy: false, error: 'Service unavailable' },
@@ -182,9 +183,51 @@ router.get('/cloud-status', async (req, res) => {
   }
 });
 
+// POST /api/analysis/wake-spaces
+router.post('/wake-spaces', async (req, res) => {
+  logger.info('Attempting to wake up Hugging Face spaces');
+  
+  if (process.env.ENABLE_CLOUD_SERVICES !== 'true') {
+    logger.info('Cloud services are disabled, skipping wake-up');
+    return res.status(200).json({
+      success: false,
+      enabled: false,
+      message: 'Cloud services are disabled in configuration'
+    });
+  }
+  
+  try {
+    // Call the analysis service to wake up HF spaces
+    const wakeResp = await axios.post(`${process.env.ANALYSIS_SERVICE_URL}/wake-spaces`, {}, {
+      headers: {
+        'x-huggingface-token': process.env.HUGGINGFACE_API_TOKEN
+      },
+      timeout: 60000 // 60 seconds timeout for waking up spaces
+    });
+    
+    logger.info('Wake spaces response', wakeResp.data);
+    return res.status(wakeResp.status).json({
+      ...wakeResp.data,
+      success: true
+    });
+  } catch (err) {
+    logger.error('Error waking up Hugging Face spaces', err);
+    return res.status(502).json({
+      success: false,
+      enabled: true,
+      error: 'Failed to wake up Hugging Face spaces',
+      message: err.message,
+      services: {
+        demucs: { enabled: true, healthy: false, error: 'Service unavailable or cold start' },
+        spleeter: { enabled: true, healthy: false, error: 'Service unavailable or cold start' }
+      }
+    });
+  }
+});
+
 // POST /api/analysis/separate-tracks
 router.post('/separate-tracks', async (req, res) => {
-  const { jobId, audioUrl } = req.body;
+  const { jobId, audioUrl, model = 'demucs' } = req.body;
   
   if (!jobId || !audioUrl) {
     return res.status(400).json({ 
@@ -193,7 +236,7 @@ router.post('/separate-tracks', async (req, res) => {
     });
   }
   
-  logger.info('Separating audio tracks with Spleeter', { jobId });
+  logger.info(`Separating audio tracks with ${model === 'demucs' ? 'Demucs v4' : 'Spleeter'}`, { jobId, model });
   
   try {
     // Call the analysis service with the Hugging Face token
@@ -201,7 +244,8 @@ router.post('/separate-tracks', async (req, res) => {
       `${process.env.ANALYSIS_SERVICE_URL}/separate-tracks`,
       {
         job_id: jobId,
-        audio_url: audioUrl
+        audio_url: audioUrl,
+        model: model // Can be 'demucs' or 'spleeter'
       },
       {
         headers: {
@@ -211,7 +255,7 @@ router.post('/separate-tracks', async (req, res) => {
     );
     
     if (response.data && response.data.success) {
-      logger.info('Track separation successful', { jobId });
+      logger.info('Track separation successful', { jobId, model });
       return res.status(200).json(response.data);
     } else {
       logger.warn('Track separation failed in analysis service', response.data);
@@ -221,7 +265,7 @@ router.post('/separate-tracks', async (req, res) => {
     logger.error('Error in track separation', err);
     return res.status(502).json({
       success: false,
-      error: 'Failed to process audio with Spleeter',
+      error: `Failed to process audio with ${model === 'demucs' ? 'Demucs v4' : 'Spleeter'}`,
       message: err.message
     });
   }

@@ -63,6 +63,18 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+      
+  wake_spaces:
+    build:
+      context: .
+      dockerfile: ./scripts/wake_spaces_service.Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HUGGINGFACE_SPLEETER_URL=${HUGGINGFACE_SPLEETER_URL}
+      - HUGGINGFACE_DEMUCS_URL=${HUGGINGFACE_DEMUCS_URL}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN}
+      - ENABLE_CLOUD_SERVICES=${ENABLE_CLOUD_SERVICES:-false}
+    restart: always
 
 volumes:
   postgres_data:

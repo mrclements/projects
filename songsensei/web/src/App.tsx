@@ -3,9 +3,10 @@ import { api, getCloudStatus, analyzeSegment, CloudServiceStatus, CloudOptions }
 import { Music, Play, Cloud, CloudOff, Info } from 'lucide-react';
 import YouTubeUrlInput from './components/YouTubeUrlInput';
 import WaveformViewer from './components/WaveformViewer';
-import SpleeterTracks from './components/SpleeterTracks';
+import SeparatedTracks from './components/SeparatedTracks';
 import AnalysisPanel from './components/AnalysisPanel';
 import LegalDisclaimer from './components/LegalDisclaimer';
+import CloudServicesStatus from './components/CloudServicesStatus';
 import { AnalysisResult, JobStatus, AnalysisResponse } from './types/analysis';
 
 function App() {
@@ -19,7 +20,7 @@ function App() {
   const [cloudStatus, setCloudStatus] = useState<CloudServiceStatus | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<string | null>(null);
   const [selectedTrackType, setSelectedTrackType] = useState<string | null>(null);
-  const [showSpleeterTracks, setShowSpleeterTracks] = useState(false);
+  const [showSeparatedTracks, setShowSeparatedTracks] = useState(false);
   const [cloudOptions, setCloudOptions] = useState<CloudOptions>({
     sourceSeparation: true,
     advancedStructure: true,
@@ -40,23 +41,10 @@ function App() {
     setTrimSelection({ start, end });
   };
 
-  // Fetch cloud service status on load
-  useEffect(() => {
-    const fetchCloudStatus = async () => {
-      try {
-        const status = await getCloudStatus();
-        setCloudStatus(status);
-      } catch (error) {
-        console.error('Failed to fetch cloud service status:', error);
-      }
-    };
-    
-    fetchCloudStatus();
-    // Refresh status every 30 seconds
-    const intervalId = setInterval(fetchCloudStatus, 30000);
-    
-    return () => clearInterval(intervalId);
-  }, []);
+  // Handle cloud status updates from the CloudServicesStatus component
+  const handleCloudStatusChange = (status: CloudServiceStatus) => {
+    setCloudStatus(status);
+  };
 
   const triggerAnalysis = async () => {
     if (!currentJob || !trimSelection) return;
@@ -117,28 +105,13 @@ function App() {
                     <><CloudOff className="h-4 w-4 mr-1" /> Cloud OFF</>
                   )}
                 </button>
-                {cloudStatus && (
-                  <div className="relative group">
-                    <Info className="h-4 w-4 text-gray-400 cursor-help" />
-                    <div className="absolute right-0 mt-2 w-64 p-2 bg-white shadow-lg rounded-md border text-xs hidden group-hover:block z-10">
-                      <p className="font-semibold mb-1">Cloud Services Status:</p>
-                      <ul className="space-y-1">
-                        {Object.entries(cloudStatus.services).map(([service, status]) => (
-                          <li key={service} className="flex items-center justify-between">
-                            <span>{service}</span>
-                            <span className={`px-1.5 py-0.5 rounded-full ${
-                              status.enabled && status.healthy 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {status.enabled && status.healthy ? 'Available' : 'Unavailable'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                )}
+                
+                <div className="relative">
+                  <CloudServicesStatus 
+                    showDetailedStatus={false}
+                    onStatusChange={handleCloudStatusChange}
+                  />
+                </div>
               </div>
               <span className="text-sm text-gray-600">
                 Status: <span className="capitalize font-medium">{jobStatus}</span>
@@ -178,27 +151,34 @@ function App() {
                 isLoading={jobStatus === 'processing'}
               />
               
-              {jobStatus === 'ready' && enableCloudServices && (
-                <div className="mt-4 flex justify-end">
-                  <button
-                    onClick={() => setShowSpleeterTracks(true)}
-                    className="btn-outline flex items-center space-x-2"
-                  >
-                    <Cloud className="h-4 w-4" />
-                    <span>Separate Instrument Tracks (Spleeter)</span>
-                  </button>
-                </div>
-              )}
+          {jobStatus === 'ready' && enableCloudServices && (
+            <div className="mt-4">
+              <div className="flex justify-between items-center">
+                <CloudServicesStatus 
+                  showDetailedStatus={true}
+                />
+                
+                <button
+                  onClick={() => setShowSeparatedTracks(true)}
+                  className="btn-outline flex items-center space-x-2"
+                  disabled={!cloudStatus || !Object.values(cloudStatus.services).some(s => s.enabled && s.healthy)}
+                >
+                  <Cloud className="h-4 w-4" />
+                  <span>Separate Instrument Tracks</span>
+                </button>
+              </div>
+            </div>
+          )}
             </div>
           )}
           
-          {/* Spleeter Tracks */}
-          {showSpleeterTracks && currentJob && (
+          {/* Separated Tracks */}
+          {showSeparatedTracks && currentJob && (
             <div className="card">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
                 2.5. Separate Instrument Tracks
               </h2>
-              <SpleeterTracks 
+              <SeparatedTracks 
                 audioUrl={currentJob ? `/api/analysis/audio/${currentJob}` : null}
                 jobId={currentJob}
                 onTrackSelected={(trackUrl, trackType) => {

@@ -7,7 +7,8 @@ import os
 from enum import Enum
 
 class CloudService(str, Enum):
-    SPLEETER = "spleeter"
+    DEMUCS = "demucs"     # New service for Demucs v4
+    SPLEETER = "spleeter" # Keep for backward compatibility
     COLAB = "colab"
     RENDER = "render"
     HUGGINGFACE = "huggingface"
@@ -26,12 +27,41 @@ class CloudOrchestrator:
     def setup_services(self):
         """Initialize cloud service connections"""
         try:
-            # Hugging Face Spaces for source separation
-            self.services[CloudService.SPLEETER] = {
-                "base_url": os.getenv("HUGGINGFACE_SPLEETER_URL", ""),
-                "api_key": os.getenv("HUGGINGFACE_API_TOKEN", ""),
-                "enabled": bool(os.getenv("HUGGINGFACE_API_TOKEN"))
-            }
+            # Hugging Face Spaces for Demucs v4 source separation
+            demucs_url = os.getenv("HUGGINGFACE_DEMUCS_URL", os.getenv("HUGGINGFACE_SPLEETER_URL", ""))
+            # Ensure the URL doesn't have duplicate /api/predict
+            if demucs_url and "/api/predict" in demucs_url:
+                self.services[CloudService.DEMUCS] = {
+                    "base_url": demucs_url,
+                    "api_key": os.getenv("HUGGINGFACE_API_TOKEN", ""),
+                    "enabled": bool(os.getenv("HUGGINGFACE_API_TOKEN")),
+                    "has_api_predict": True
+                }
+            else:
+                self.services[CloudService.DEMUCS] = {
+                    "base_url": demucs_url,
+                    "api_key": os.getenv("HUGGINGFACE_API_TOKEN", ""),
+                    "enabled": bool(os.getenv("HUGGINGFACE_API_TOKEN")),
+                    "has_api_predict": False
+                }
+            
+            # Keep Spleeter for backward compatibility
+            spleeter_url = os.getenv("HUGGINGFACE_SPLEETER_URL", "")
+            # Ensure the URL doesn't have duplicate /api/predict
+            if spleeter_url and "/api/predict" in spleeter_url:
+                self.services[CloudService.SPLEETER] = {
+                    "base_url": spleeter_url,
+                    "api_key": os.getenv("HUGGINGFACE_API_TOKEN", ""),
+                    "enabled": bool(os.getenv("HUGGINGFACE_API_TOKEN")),
+                    "has_api_predict": True
+                }
+            else:
+                self.services[CloudService.SPLEETER] = {
+                    "base_url": spleeter_url,
+                    "api_key": os.getenv("HUGGINGFACE_API_TOKEN", ""),
+                    "enabled": bool(os.getenv("HUGGINGFACE_API_TOKEN")),
+                    "has_api_predict": False
+                }
             
             # Google Colab for song structure analysis
             self.services[CloudService.COLAB] = {
@@ -59,38 +89,23 @@ class CloudOrchestrator:
         except Exception as e:
             logger.warning(f"Error initializing cloud services: {str(e)}")
     
-    async def health_check(self, service: CloudService) -> bool:
-        """Check if a cloud service is available"""
+    async def health_check(self, service: CloudService, max_retries: int = 3) -> bool:
+        """
+        Check if a cloud service is available
+        
+        For Hugging Face Spaces, implements retry logic to handle space wake-up (503 errors)
+        """
         try:
             if not self.services[service]["enabled"]:
+                logger.info(f"Service {service} is disabled, skipping health check")
                 return False
             
             # Different health check approaches based on service type
-            if service == CloudService.SPLEETER:
-                # For Gradio-based Hugging Face Spaces, just check if the API endpoint exists
-                # Gradio doesn't have a dedicated health endpoint
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    # Make a HEAD request to check if the endpoint exists
-                    response = await client.head(
-                        self.services[service]['base_url'],
-                        headers={"Authorization": f"Bearer {self.services[service]['api_key']}"}
-                    )
-                    healthy = 200 <= response.status_code < 500  # Any non-5xx response is good enough
+            if service in [CloudService.SPLEETER, CloudService.DEMUCS]:
+                return await self._huggingface_health_check(service, max_retries)
             else:
                 # Default health check for other services
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(
-                        f"{self.services[service]['base_url']}/health",
-                        headers={"Authorization": f"Bearer {self.services[service]['api_key']}"}
-                    )
-                    healthy = response.status_code == 200
-                
-            self.service_health[service] = {
-                "healthy": healthy,
-                "last_check": time.time()
-            }
-            
-            return healthy
+                return await self._standard_health_check(service)
             
         except Exception as e:
             logger.warning(f"Health check failed for {service}: {str(e)}")
@@ -101,35 +116,233 @@ class CloudOrchestrator:
             }
             return False
     
+    async def _huggingface_health_check(self, service: CloudService, max_retries: int = 3) -> bool:
+        """
+        Health check specifically for Hugging Face Spaces with retry logic
+        to handle spaces that are waking up or hibernating
+        """
+        base_url = self.services[service]['base_url']
+        api_key = self.services[service]['api_key']
+        
+        # Ensure URL doesn't end with a slash
+        if base_url.endswith('/'):
+            base_url = base_url[:-1]
+        
+        # Remove /api/predict if present as we just want to check connectivity
+        if base_url.endswith('/api/predict'):
+            base_url = base_url.replace('/api/predict', '')
+        
+        logger.info(f"Checking health of {service} at {base_url}")
+        
+        # Initialize retry counter and backoff time
+        retries = 0
+        backoff_time = 1.0  # Start with 1 second
+        
+        while retries <= max_retries:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:  # Extended timeout for reliability
+                    try:
+                        response = await client.get(
+                            base_url,
+                            headers={"Authorization": f"Bearer {api_key}"}
+                        )
+                        status_code = response.status_code
+                        logger.info(f"Health check for {service} (retry {retries}): status code {status_code}")
+                        
+                        # Status handling:
+                        # 2xx: Service is up and running
+                        # 503: Service is waking up from hibernation
+                        # Other: Service has some other issue
+                        
+                        if 200 <= status_code < 300:
+                            # Success! Service is available
+                            healthy = True
+                            break
+                        elif status_code == 503 and retries < max_retries:
+                            # Space is hibernating and waking up
+                            logger.info(f"Service {service} is waking up (503). Retrying in {backoff_time:.1f}s...")
+                            await asyncio.sleep(backoff_time)
+                            backoff_time *= 2  # Exponential backoff
+                            retries += 1
+                            continue
+                        else:
+                            # Other status codes are treated as errors
+                            logger.warning(f"Service {service} returned unexpected status {status_code}")
+                            healthy = False
+                            break
+                            
+                    except Exception as e:
+                        logger.error(f"Error during {service} health check request (retry {retries}): {str(e)}")
+                        if retries < max_retries:
+                            await asyncio.sleep(backoff_time)
+                            backoff_time *= 2
+                            retries += 1
+                            continue
+                        healthy = False
+                        break
+                        
+            except Exception as outer_e:
+                logger.error(f"Outer error during health check for {service}: {str(outer_e)}")
+                healthy = False
+                break
+        
+        # Update service health status
+        self.service_health[service] = {
+            "healthy": healthy,
+            "last_check": time.time(),
+            "retries": retries,
+            "wake_up_attempted": retries > 0
+        }
+        
+        return healthy
+    
+    async def _standard_health_check(self, service: CloudService) -> bool:
+        """Standard health check for non-Hugging Face services"""
+        logger.info(f"Using standard health check for {service}")
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.services[service]['base_url']}/health",
+                    headers={"Authorization": f"Bearer {self.services[service]['api_key']}"}
+                )
+                logger.info(f"Health check for {service}: status code {response.status_code}")
+                healthy = response.status_code == 200
+            
+            self.service_health[service] = {
+                "healthy": healthy,
+                "last_check": time.time()
+            }
+            
+            return healthy
+        except Exception as e:
+            logger.error(f"Standard health check failed for {service}: {str(e)}")
+            self.service_health[service] = {
+                "healthy": False,
+                "last_check": time.time(),
+                "error": str(e)
+            }
+            return False
+    
     async def separate_sources(self, audio_path: str) -> Dict[str, Any]:
         """
-        Separate audio sources using Spleeter via Hugging Face Spaces
-        Falls back to local processing if service unavailable
+        Separate audio sources using Demucs v4 via Hugging Face Spaces
+        Falls back to Spleeter if Demucs unavailable, then to local processing
         """
         try:
-            if await self.health_check(CloudService.SPLEETER):
-                logger.info("Using cloud source separation (Spleeter)")
+            # First try Demucs v4
+            if await self.health_check(CloudService.DEMUCS):
+                logger.info("Using cloud source separation (Demucs v4)")
+                return await self._cloud_demucs_separation(audio_path)
+            # Fall back to Spleeter if Demucs is unavailable
+            elif await self.health_check(CloudService.SPLEETER):
+                logger.info("Demucs unavailable, falling back to Spleeter")
                 return await self._cloud_source_separation(audio_path)
             else:
-                logger.info("Cloud service unavailable, using local fallback")
+                logger.info("Cloud services unavailable, using local fallback")
                 return await self._local_source_separation_fallback(audio_path)
                 
         except Exception as e:
             logger.error(f"Source separation failed: {str(e)}")
+            # Try Spleeter as fallback if Demucs fails
+            try:
+                if await self.health_check(CloudService.SPLEETER):
+                    logger.info("Falling back to Spleeter after Demucs failure")
+                    return await self._cloud_source_separation(audio_path)
+            except Exception as spleeter_error:
+                logger.error(f"Spleeter fallback also failed: {str(spleeter_error)}")
+                
             return await self._local_source_separation_fallback(audio_path)
     
-    async def _cloud_source_separation(self, audio_path: str) -> Dict[str, Any]:
-        """Perform source separation using cloud service with Gradio API"""
+    async def _cloud_demucs_separation(self, audio_path: str) -> Dict[str, Any]:
+        """Perform source separation using Demucs v4 via Hugging Face Spaces Gradio API"""
         try:
             # Read audio file
             with open(audio_path, 'rb') as f:
                 audio_data = f.read()
             
-            # For Gradio API in Hugging Face Spaces, the endpoint is /api/predict
-            # and we need to format the request differently
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # For Gradio API in Hugging Face Spaces
+            async with httpx.AsyncClient(timeout=120.0) as client:  # Longer timeout for Demucs
+                # Check if the base_url already contains /api/predict
+                if self.services[CloudService.DEMUCS].get("has_api_predict", False):
+                    url = f"{self.services[CloudService.DEMUCS]['base_url']}"
+                else:
+                    url = f"{self.services[CloudService.DEMUCS]['base_url']}/api/predict"
+                
+                logger.info(f"Sending request to Demucs at: {url}")
+                
                 response = await client.post(
-                    f"{self.services[CloudService.SPLEETER]['base_url']}",
+                    url,
+                    files={"data": ("audio.wav", audio_data, "audio/wav")},
+                    headers={"Authorization": f"Bearer {self.services[CloudService.DEMUCS]['api_key']}"}
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    # Handle Gradio API response format which might be nested
+                    # The output will contain URLs to each stem
+                    if isinstance(result, list):
+                        # Demucs v4 typically returns: drums, bass, other, vocals (and possibly guitar, piano)
+                        # Map the sources by their expected positions
+                        stems = {}
+                        source_names = ["drums", "bass", "other", "vocals"]
+                        
+                        # For standard 4-stem model
+                        if len(result) >= 4:
+                            for i, name in enumerate(source_names):
+                                if i < len(result) and result[i]:
+                                    stems[name] = result[i]
+                            
+                            # Add any additional stems with their index names
+                            for i in range(4, len(result)):
+                                if result[i]:
+                                    stems[f"stem_{i}"] = result[i]
+                        
+                        return {
+                            **stems,  # Include all stems dynamically
+                            "success": True,
+                            "cloud_service": CloudService.DEMUCS
+                        }
+                    else:
+                        # Standard API response with named fields
+                        stems = {}
+                        for key, value in result.items():
+                            # Convert keys like "vocals_url" to "vocals_path"
+                            if key.endswith("_url"):
+                                stem_name = key.replace("_url", "")
+                                stems[f"{stem_name}_path"] = value
+                        
+                        return {
+                            **stems,
+                            "success": True,
+                            "cloud_service": CloudService.DEMUCS
+                        }
+                else:
+                    raise Exception(f"Cloud service returned {response.status_code}")
+        except Exception as e:
+            logger.error(f"Cloud Demucs separation failed: {str(e)}")
+            raise
+                    
+    async def _cloud_source_separation(self, audio_path: str) -> Dict[str, Any]:
+        """Perform source separation using Spleeter via Hugging Face Spaces with Gradio API"""
+        try:
+            # Read audio file
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
+            
+            # For Gradio API in Hugging Face Spaces
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Check if the base_url already contains /api/predict
+                if self.services[CloudService.SPLEETER].get("has_api_predict", False):
+                    url = f"{self.services[CloudService.SPLEETER]['base_url']}"
+                else:
+                    url = f"{self.services[CloudService.SPLEETER]['base_url']}/api/predict"
+                
+                logger.info(f"Sending request to Spleeter at: {url}")
+                
+                response = await client.post(
+                    url,
                     files={"data": ("audio.wav", audio_data, "audio/wav")},
                     headers={"Authorization": f"Bearer {self.services[CloudService.SPLEETER]['api_key']}"}
                 )
